@@ -1,0 +1,244 @@
+public class UpdateAdvocateActivityTriggerHelper {
+  
+  public static void handleAfterUpdate(List<Related_Reference__c> newReferences , Map<id,Related_Reference__c> Oldreferences) {
+      // Set to store unique Account Ids
+      Set<Id> accountIds = new Set<Id>();
+      for (Related_Reference__c reference : newReferences) {
+          if (reference.Date_Completed__c != null ) {
+              // First time "Date Completed" is set
+              accountIds.add(reference.Reference_Account__c);
+          }
+          
+      }
+      
+      // Process Advocate Activities for Related References
+      if (!accountIds.isEmpty()) {
+          List<Advocate_Activity__c> advocateActivitiesToUpdate = new List<Advocate_Activity__c>();
+          List<Advocate_Activity__c> advocateActivitiesToInsert = new List<Advocate_Activity__c>();
+          List<Advocate_Activity__c> advocateActivitiesToDateChange = new List<Advocate_Activity__c>();
+          
+          Map<Id, Reference_Request__c> referenceRequestMap = new Map<Id, Reference_Request__c>([SELECT Id, Type_of_Reference__c FROM Reference_Request__c
+                                                                                                 WHERE Id IN (SELECT Reference_Request__c FROM Related_Reference__c WHERE Id IN :newReferences)]);
+          
+          
+          for (Id accountId : accountIds) {
+              // Initialize the advocateActivity here
+              Advocate_Activity__c advocateActivity;
+              
+              for (Related_Reference__c references : newReferences) {
+                  
+                  // Find or create Advocate Activity for account
+                  Integer currentYear = Date.today().year();
+                  List<Advocate_Activity__c> existingActivities = [SELECT Id, Calendar_Year__c, Account__c,Site_Visit_Count__c, Reference_Call_Count__c,RFP_Count__c, Virtual_Site_Visit_Count__c,RFP_Submission_Count__c FROM Advocate_Activity__c                                                                
+                                                                   WHERE Account__c = :accountId AND CALENDAR_YEAR(Calendar_Year__c) =:references.Date_Completed__c.year() LIMIT 1];
+                  
+                  if (existingActivities.isEmpty()) {
+                      
+                      advocateActivity = new Advocate_Activity__c();
+                      advocateActivity.Name = getAdvocateActivityName(accountId, references.Date_Completed__c.year());
+                      advocateActivity.Calendar_Year__c = Date.newInstance(references.Date_Completed__c.year(), 1, 1);
+                      advocateActivity.Account__c = accountId;
+                      if (referenceRequestMap.containsKey(references.Reference_Request__c)) {
+                          Reference_Request__c referenceRequest = referenceRequestMap.get(references.Reference_Request__c);
+                          String typeOfReference = referenceRequest.Type_of_Reference__c;
+                          
+                          if (typeOfReference == 'In Person Site Visit') {
+                              Decimal siteCount = advocateActivity.Site_Visit_Count__c;
+                              siteCount = siteCount != null ? siteCount + 1 : 1;
+                              advocateActivity.Site_Visit_Count__c = siteCount;
+                              
+                          } else if (typeOfReference == 'Reference Call') {
+                              Decimal RefCall = advocateActivity.Reference_Call_Count__c;
+                              RefCall = RefCall != null ? RefCall + 1 : 1;
+                              advocateActivity.Reference_Call_Count__c = RefCall;
+                          } else if (typeOfReference == 'RFP') {
+                              Decimal RFP = advocateActivity.RFP_Count__c;
+                              RFP = RFP != null ? RFP + 1 : 1;
+                              advocateActivity.RFP_Count__c = RFP;
+                          } else if (typeOfReference == 'Virtual Site Visit') {
+                              Decimal VSV = advocateActivity.Virtual_Site_Visit_Count__c;
+                              VSV = VSV != null ? VSV + 1 : 1;
+                              advocateActivity.Virtual_Site_Visit_Count__c = VSV;
+                          }
+                          if (typeOfReference == 'RFP' && references.Date_of_Contact__c != null) {
+                              advocateActivity.RFP_Submission_Count__c = 1;
+                          }
+                      }
+                      
+                      
+                      advocateActivitiesToInsert.add(advocateActivity);
+                  } 
+                  else {
+                      Advocate_Activity__c existingActivity = existingActivities[0];
+                      Date completedYear = Date.newInstance(references.Date_Completed__c.year(), 1, 1);
+                      
+                      if(existingActivity.Calendar_Year__c != completedYear){
+                          existingActivity.Calendar_Year__c = completedYear;
+                          advocateActivitiesToDateChange.add(existingActivity);
+                      }
+                      if(Oldreferences != Null){
+                          Related_Reference__c oldReference = Oldreferences.get(references.Id);
+                          
+                          Id newReferenceRequestId = references.Reference_Request__c;
+                          Id oldReferenceRequestId = oldReference != null ? oldReference.Reference_Request__c : null;
+                          
+                          if ((newReferenceRequestId != oldReferenceRequestId)|| oldReference.Date_Completed__c == null ) {
+                              if (referenceRequestMap.containsKey(references.Reference_Request__c)) {
+                                  Reference_Request__c referenceRequest = referenceRequestMap.get(references.Reference_Request__c);
+                                  String typeOfReference = referenceRequest.Type_of_Reference__c;
+                                  
+                                  if (typeOfReference == 'In Person Site Visit') {
+                                      Decimal siteCount = existingActivity.Site_Visit_Count__c;
+                                      siteCount = siteCount != null ? siteCount + 1 : 1;
+                                      existingActivity.Site_Visit_Count__c = siteCount;
+                                      
+                                  } else if (typeOfReference == 'Reference Call') {
+                                      
+                                      Decimal RefCall = existingActivity.Reference_Call_Count__c;
+                                      RefCall = RefCall != null ? RefCall + 1 : 1;
+                                      existingActivity.Reference_Call_Count__c = RefCall;
+                                  } else if (typeOfReference == 'RFP') {
+                                      
+                                      Decimal RFP = existingActivity.RFP_Count__c;
+                                      RFP = RFP != null ? RFP + 1 : 1;
+                                      existingActivity.RFP_Count__c = RFP;
+                                  } else if (typeOfReference == 'Virtual Site Visit') {
+                                      
+                                      Decimal VSV = existingActivity.Virtual_Site_Visit_Count__c;
+                                      VSV = VSV != null ? VSV + 1 : 1;
+                                      existingActivity.Virtual_Site_Visit_Count__c = VSV;
+                                  }
+                                  if (typeOfReference == 'RFP' && references.Date_of_Contact__c != oldReference.Date_of_Contact__c) {
+                                      Decimal RFPSub = existingActivity.RFP_Submission_Count__c;
+                                      RFPSub = RFPSub != null ? RFPSub + 1 : 1;
+                                      existingActivity.RFP_Submission_Count__c = RFPSub;
+                                      
+                                  }
+                                  
+                              }
+                          }
+                          
+                      } 
+                      advocateActivitiesToUpdate.add(existingActivity);
+                      
+                  }
+              }
+          }
+          
+          // Update Advocate Activities, Related Reference
+          insert advocateActivitiesToInsert;
+          Update advocateActivitiesToUpdate;
+          Update advocateActivitiesToDateChange;
+          
+      }
+      
+  }
+  
+  private static String getAdvocateActivityName(Id accountId, Integer year) {
+      Account account = [SELECT Name FROM Account WHERE Id = :accountId LIMIT 1];
+      return account.Name + ' - ' + String.valueOf(year);
+  }
+  
+  public static void EliminateDuplicateRelatedReference(List<Related_Reference__c> newReferences) {
+      Set<Id> accountIds = new Set<Id>();
+      Set<Id> RefReq = New Set<Id>();
+      for (Related_Reference__c refer : newReferences) {
+          accountIds.add(refer.Reference_Account__c);
+          RefReq.add(refer.Reference_Request__c);
+          
+      }
+      
+      List<Related_Reference__c> existingReferences = [SELECT Id, Reference_Account__c,Reference_Request__c FROM Related_Reference__c WHERE Reference_Account__c IN :accountIds AND Reference_Request__c IN :RefReq];
+      Map<Id, Related_Reference__c> accountToReferenceMap = new Map<Id, Related_Reference__c>();
+      
+      for (Related_Reference__c existingReference : existingReferences) {
+          accountToReferenceMap.put(existingReference.Reference_Account__c, existingReference);
+      }
+      
+      for (Related_Reference__c newReference : newReferences) {
+          if (accountToReferenceMap.containsKey(newReference.Reference_Account__c)) {
+              newReference.addError('The Account Already Exists with Related Reference Record');
+          }
+      }
+  }
+  
+  Public Static Void UpdateDateofConatct(List<Related_Reference__c> newReferences , Map<id,Related_Reference__c> Oldreferences){
+      // Set to store unique Account Ids
+      Set<Id> accountIds = new Set<Id>();
+      for (Related_Reference__c reference : newReferences) {
+          if (reference.Date_Completed__c == null || reference.Date_of_Contact__c != null) {
+              // First time "Date Completed" is set
+              accountIds.add(reference.Reference_Account__c);
+          }
+          
+      }
+      if (!accountIds.isEmpty()) {
+          List<Advocate_Activity__c> advocateActivitiesToUpdate = new List<Advocate_Activity__c>();
+          List<Advocate_Activity__c> advocateActivitiesToInsert = new List<Advocate_Activity__c>();
+          
+          
+          Map<Id, Reference_Request__c> referenceRequestMap = new Map<Id, Reference_Request__c>([SELECT Id, Type_of_Reference__c FROM Reference_Request__c
+                                                                                                 WHERE Id IN (SELECT Reference_Request__c FROM Related_Reference__c WHERE Id IN :newReferences)]);                       
+          
+          for (Id accountId : accountIds) {
+              // Initialize the advocateActivity here
+              Advocate_Activity__c advocateActivity;
+              
+              for (Related_Reference__c references : newReferences) {
+                  
+                  // Find or create Advocate Activity for account
+                  Integer currentYear = Date.today().year();
+                  List<Advocate_Activity__c> existingActivities = [SELECT Id, Calendar_Year__c, Account__c,Site_Visit_Count__c, Reference_Call_Count__c,RFP_Count__c, Virtual_Site_Visit_Count__c,RFP_Submission_Count__c FROM Advocate_Activity__c                                                                
+                                                                   WHERE Account__c = :accountId AND CALENDAR_YEAR(Calendar_Year__c) =:currentYear LIMIT 1];
+                  
+                  if (existingActivities.isEmpty() && references.Date_of_Contact__c != null) {
+                      
+                      advocateActivity = new Advocate_Activity__c();
+                      advocateActivity.Name = getAdvocateActivityName(accountId, Date.today().year());
+                      advocateActivity.Calendar_Year__c = Date.newInstance( Date.today().year(), 1, 1);
+                      advocateActivity.Account__c = accountId;
+                      if (referenceRequestMap.containsKey(references.Reference_Request__c)) {
+                          Reference_Request__c referenceRequest = referenceRequestMap.get(references.Reference_Request__c);
+                          
+                          String typeOfReference = referenceRequest.Type_of_Reference__c;
+                          
+                          if (typeOfReference == 'RFP' && references.Date_of_Contact__c != null) {
+                              advocateActivity.RFP_Submission_Count__c = 1;
+                          }
+                      }
+                      
+                      
+                      advocateActivitiesToInsert.add(advocateActivity);
+                  } 
+                  else if (Oldreferences != Null) {
+                      Advocate_Activity__c existingActivity = existingActivities[0];
+                      
+                      Related_Reference__c oldReference = Oldreferences.get(references.Id);
+                      
+                      if(references.Date_of_Contact__c != oldReference.Date_of_Contact__c){
+                          if (referenceRequestMap.containsKey(references.Reference_Request__c)) {
+                              Reference_Request__c referenceRequest = referenceRequestMap.get(references.Reference_Request__c);
+                              String typeOfReference = referenceRequest.Type_of_Reference__c;
+                              if (typeOfReference == 'RFP' && references.Date_of_Contact__c != null) {
+                                  Decimal RFPSub = existingActivity.RFP_Submission_Count__c;
+                                  RFPSub = RFPSub != null ? RFPSub + 1 : 1;
+                                  existingActivity.RFP_Submission_Count__c = RFPSub;
+                                  
+                              }
+                          }
+                      }
+                      
+                      advocateActivitiesToUpdate.add(existingActivity);
+                      
+                  }
+              }
+          }
+          
+          // Update Advocate Activities, Related Reference
+          insert advocateActivitiesToInsert;
+          Update advocateActivitiesToUpdate;
+          
+      }
+      
+  }
+}
