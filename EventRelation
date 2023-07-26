@@ -1,0 +1,36 @@
+List<Contact> lstcon =[SELECT Id, Name, FCRM__FCR_Status__c, Disqualified_Reason__c,FCRM__FCR_Status_Last_Set__c,(SELECT Id,Whoid, Type, EndDateTime FROM Events WHERE TYPE IN ('Discovery Meeting', 'Remote Demo', 'Onsite Demo', 'Onsite Meeting') ORDER BY EndDateTime DESC LIMIT 1),
+                       (SELECT Id, Subject, ActivityDate FROM ActivityHistories ORDER BY ActivityDate DESC LIMIT 1) FROM CONTACT WHERE FCRM__FCR_Status__c IN ('Meeting Booked','open','SDR Working','Sales Exec Working','Nurture') AND Id='0034W00002O1JELQA3'];
+
+// Collect Contact IDs from lstcon
+Set<Id> contactIds = new Set<Id>();
+Set<Id> EventIds = New Set<Id> ();
+for (Contact contact : lstcon) {
+    List<EventRelation> eventRelations = [SELECT Id, EventId, RelationId
+                                              FROM EventRelation
+                                              WHERE RelationId = :contact.Id];
+if (!eventRelations.isEmpty()) {
+            // Assuming you want to check the first event relation in the list
+    For(EventRelation eve : eventRelations){
+        EventIds.add(eve.EventId);
+    }
+}
+}
+System.debug('Event Id:'+ EventIds.size());
+
+List<Event> events = [
+    SELECT Id, WhoId, Type, EndDateTime
+    FROM Event
+    WHERE Id IN :eventIds
+    AND Type IN ('Discovery Meeting', 'Remote Demo', 'Onsite Demo', 'Onsite Meeting')
+    ORDER BY EndDateTime DESC
+    LIMIT 1
+];
+
+if (!events.isEmpty()) {
+    Event event = events[0];
+    System.debug('Event ID: ' + event.Id);
+    System.debug('Event Type: ' + event.Type);
+    System.debug('Event EndDateTime: ' + event.EndDateTime);
+} else {
+    System.debug('No related events found.');
+}
