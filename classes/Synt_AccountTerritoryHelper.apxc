@@ -1,0 +1,343 @@
+public with sharing class SYNT_AccountTerritoryHelper {
+    public static Map<Id, accountHierarchyWrapper> accHierCollectionMap = new Map<Id, accountHierarchyWrapper>();
+
+    //This method select all accounts in a hierarchy and determines the Sales Territory type per rules defined in the STORY-1363
+    public static Map<Id, accountHierarchyWrapper> getAccountHierCollection(Set<Id> ultimateParentIds) {
+        Integer lastNMonths = 14;
+        String lastNMonths_settings = SYNT_GlobalSettings__mdt.getInstance('SYNT_ExistBusiness_Transfer_Duration').SYNT_Value__c;
+        if(Integer.valueof(lastNMonths_settings) > 0) {
+            lastNMonths = Integer.valueof(lastNMonths_settings);
+        }
+        Date newBusinessTransfer = System.today().addMonths(-lastNMonths);
+        System.debug('New Business Transfer Date ==> '+newBusinessTransfer);
+
+        //select parent-child accounts for each ultimate parent / Stand alone accounts upto 5 levels down,
+        // also select subscriptions for client products
+        for (Account account : [
+                SELECT  Id,
+                        ParentId,
+                        Parent.ParentId,
+                        Parent.Parent.ParentId,
+                        Parent.Parent.Parent.ParentId,
+                        Parent.Parent.Parent.Parent.ParentId,
+                        Parent.Parent.Parent.Parent.Parent.ParentId,
+                        Name,Type,SYNT_Vertical__c,SYNT_Sales_Territory_AssignType__c,
+                        SYNT_Account_Hierarchy_Type__c, SYNT_Account_Transfer_Date__c,
+                        Sales_Terr_Assignment_Type_Stratasan__c,SYNT_Override_Team_Role_Assignments__c,
+                        (   SELECT Id,SBQQ__Product__r.Client_Products_for_Territory__c FROM SBQQ__Subscriptions__r
+                            WHERE SBQQ__Product__r.Client_Products_for_Territory__c != NULL )
+                FROM Account
+                WHERE SYNT_Vertical__c != NULL AND (
+                        Id IN :ultimateParentIds
+                        OR ParentId IN :ultimateParentIds
+                        OR Parent.ParentId IN :ultimateParentIds
+                        OR Parent.Parent.ParentId IN :ultimateParentIds
+                        OR Parent.Parent.Parent.ParentId IN :ultimateParentIds
+                        OR Parent.Parent.Parent.Parent.ParentId IN :ultimateParentIds
+                        OR Parent.Parent.Parent.Parent.Parent.ParentId IN :ultimateParentIds )
+                ORDER BY
+                        Parent.Parent.Parent.Parent.Parent.ParentId NULLS LAST,
+                        Parent.Parent.Parent.Parent.ParentId NULLS LAST,
+                        Parent.Parent.Parent.ParentId NULLS LAST,
+                        Parent.Parent.ParentId NULLS LAST,
+                        Parent.ParentId NULLS LAST,
+                        ParentId NULLS LAST
+        ]) {
+
+            Id ultimateParent;
+            String vertical;
+
+            //determine ultimate parent
+            if(account.Parent.Parent.Parent.Parent.Parent.ParentId != null)
+                ultimateParent = account.Parent.Parent.Parent.Parent.Parent.ParentId;
+            else if(account.Parent.Parent.Parent.Parent.Parent.ParentId != null)
+                ultimateParent = account.Parent.Parent.Parent.Parent.Parent.ParentId;
+            else if(account.Parent.Parent.Parent.ParentId != null)
+                ultimateParent = account.Parent.Parent.Parent.ParentId;
+            else if(account.Parent.Parent.ParentId != null)
+                ultimateParent = account.Parent.Parent.ParentId;
+            else if(account.Parent.ParentId != null)
+                ultimateParent = account.Parent.ParentId;
+            else if(account.ParentId != null)
+                ultimateParent = account.ParentId;
+            else {
+                ultimateParent = account.Id;
+                vertical = account.SYNT_Vertical__c;        //pick vertical only from the ultimate parent
+            }
+
+            //is account transfer date from new business exception to 'Existing Business'
+            Boolean  isExistingBusiness = false;
+            if ((account.SYNT_Account_Transfer_Date__c != null) && (account.SYNT_Account_Transfer_Date__c <= System.today())) {
+                isExistingBusiness = true;
+            }
+            Boolean  isProdForTerr = false;
+			if ((!account.Product_Families_Test__c.contains('Stratasan'))) {
+                isProdForTerr = true;
+            }
+			Boolean  isActiveStratasanSubscription = false;
+			if ((account.Product_Families_Test__c.contains('Stratasan'))) {
+                isActiveStratasanSubscription = true;
+            }
+            Boolean  IsBoth = false;
+			if ((account.Product_Families_Test__c.contains('Stratasan') && account.Product_Families_Test__c != 'Stratasan')) {
+                IsBoth = true;
+            }
+            Boolean IsOther = False;
+            if ((account.Product_Families_Test__c ==Null || account.Product_Families_Test__c == 'IDEA')) {
+                IsOther = true;
+            }
+            //is any of account's subscriptions contains product of 'client for territory' value set
+            // If any Account in the Hierarchy has an Active Stratasan Subscription
+             /* Boolean  isProdForTerr = false;
+                Boolean  isActiveStratasanSubscription = false;     //Stratasan Enhancement
+                if(account.SBQQ__Subscriptions__r != null && account.SBQQ__Subscriptions__r.size() > 0){
+                    for(SBQQ__Subscription__c sub : account.SBQQ__Subscriptions__r){
+                        if(sub.SBQQ__Product__r.Client_Products_for_Territory__c == 'TRUE'){
+                            isProdForTerr = true;
+                        }else if(sub.SBQQ__Product__r.Client_Products_for_Territory__c == 'Stratasan'){
+                            isActiveStratasanSubscription = true;
+                        }
+                    }
+                } */
+
+
+
+            //prepare collection map with ultimate parent as the key and all multiple levels of children
+            updateAccHierCollectionMap(ultimateParent,isProdForTerr,isActiveStratasanSubscription,isExistingBusiness,vertical,account,IsBoth,IsOther);
+        }
+
+        //determine 'Sales Territory Assignment Type'
+        for (Id up : accHierCollectionMap.keySet()) {
+            accountHierarchyWrapper ahc = accHierCollectionMap.get(up);
+            Boolean goNextRule = true;
+            Integer rule = 1;
+            do {
+                for(Account acc : ahc.childAccounts){
+                    switch on rule {
+                        when 1 {
+                            String terrType = acc.SYNT_Sales_Territory_AssignType__c;
+                            if(String.isNotEmpty(terrType)){
+                                //if any account is named as enterprise / exception, mark all accounts in hierarchy the same way
+                                if(terrType == 'Named Account (Enterprise)' ||
+                                    terrType == 'Named Account (Exception)'){
+                                    ahc.SalesTerrAssignType = terrType;
+                                    goNextRule = false;
+                                    break;
+                                }
+                                //if any account's subscriptions start date is more than 14 months old,
+                                // move from exception new sale -> existing business
+                                if(terrType == 'Named Account (Exception New Sale)'){
+                                    if(ahc.isExistingBusiness){
+                                        ahc.SalesTerrAssignType = 'Existing Business';
+                                    }else {
+                                        ahc.SalesTerrAssignType = terrType;
+                                    }
+                                    goNextRule = false;
+                                    break;
+                                }
+                            }
+                        }
+                        when 2 {
+                            if (acc.Type == 'Client' && ahc.isProdForTerr) {
+                                ahc.SalesTerrAssignType = 'Existing Business';
+                                goNextRule = false;
+                                break;
+                            }
+                        }
+                        //User story 1712 - when Type = 'Partner Client'
+                        // then classify territory type as 'Existing Business'
+                        when 3 {
+                            if(acc.Type == 'Partner Client'){
+                                ahc.SalesTerrAssignType = 'Existing Business';
+                                goNextRule = false;
+                                break;
+                            }
+                        }
+                        when 4 {
+                            ahc.SalesTerrAssignType = 'New Business';
+                            goNextRule = false;
+                            break;
+                        }
+                        //--enhancement on 03/11/2022
+                        when else {
+                            goNextRule = false;
+                            break;
+                        }
+                    }
+                }
+                rule++;
+            }while (goNextRule);
+        }
+
+        // Enhancement for Stratasan
+        //determine 'Sales Terr Assignment Type Stratasan'
+        for (Id up : accHierCollectionMap.keySet()) {
+            accountHierarchyWrapper ahc = accHierCollectionMap.get(up);
+            Boolean goNextRule = true;
+            Integer rule = 1;
+            do {
+                for(Account acc : ahc.childAccounts){
+                    switch on rule {
+                        when 1 {
+                            String terrType_Stratasan = acc.Sales_Terr_Assignment_Type_Stratasan__c;
+                            if(String.isNotEmpty(terrType_Stratasan)){
+                                //if any account is named as enterprise / exception, mark all accounts in hierarchy the same way
+                                if(terrType_Stratasan.contains('Named Account')  ){
+                                    ahc.SalesTerrAssignType_Stratasan = terrType_Stratasan;
+                                    goNextRule = false;
+                                    break;
+                                }
+                            }
+                        }
+                        when 2 {
+                            //If any Account in the Hierarchy has an Active Stratasan Subscription, then
+                            // Sales_Territory_Assignment_Type_Stratasan__c  Set To “Existing Business”
+                            if (ahc.isActiveStratasanSubscription) {
+                                ahc.SalesTerrAssignType_Stratasan = 'Existing Business';
+                                goNextRule = false;
+                                break;
+                            }
+                        }
+                        when 3 {
+                            //If no Account in the Hierarchy has an Active Stratasan Subscription, then
+                            // Sales_Territory_Assignment_Type_Stratasan__c  Set To “New Business”
+                            if (!ahc.isActiveStratasanSubscription) {
+                                ahc.SalesTerrAssignType_Stratasan = 'New Business';
+                                goNextRule = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+                rule++;
+            }while (goNextRule);
+        }
+
+
+
+        //visualize map output in debug logs
+        for (Id up : accHierCollectionMap.keySet()) {
+            System.debug( 'RETURN MAP -->> '+ up + ';'+
+                    ' Ultimate Parent ==>> ' + accHierCollectionMap.get(up).ultimateParent +';'+
+                    ' isProdForTerr ==> '+accHierCollectionMap.get(up).isProdForTerr +';'+
+                    ' vertical ==> '+accHierCollectionMap.get(up).vertical +';'+
+                    ' SalesTerrAssignType ==> '+accHierCollectionMap.get(up).SalesTerrAssignType);
+            for(Account a: accHierCollectionMap.get(up).childAccounts){
+                System.debug('Child Account ==> '+a);
+            }
+        }
+
+        return accHierCollectionMap;
+    }
+
+    //collect accounts into hierarchy wrapper collection
+    public static void updateAccHierCollectionMap(
+            Id ultimateParent,
+            Boolean isProdForTerr,
+            Boolean isActiveStratasanSubscription,
+            Boolean isExistingBusiness,
+            String vertical,
+            Account childAccount,
+        	Boolean IsBoth,
+            Boolean IsOther
+    ){
+        if (!accHierCollectionMap.containsKey(ultimateParent)) {
+            accHierCollectionMap.put(ultimateParent, new accountHierarchyWrapper());
+        }
+        accountHierarchyWrapper collection = accHierCollectionMap.get(ultimateParent);
+        collection.ultimateParent = ultimateParent;
+        collection.childAccounts.add(childAccount);
+
+        //update collection with ultimate parent vertical.
+        if(String.isNotEmpty(vertical)){
+            collection.vertical = vertical;
+        }
+        //update collection only if its true.
+        if(isProdForTerr){
+            System.debug('isProdForTerr == TRUE ==> '+childAccount);
+            collection.isProdForTerr = isProdForTerr;
+        }
+        //update collection only if its true.
+        if(isActiveStratasanSubscription){
+            System.debug('isActiveStratasanSubscription == TRUE ==> '+childAccount);
+            collection.isActiveStratasanSubscription = isActiveStratasanSubscription;
+        }
+
+        if(isExistingBusiness){
+            System.debug('isNewSale == TRUE ==> '+childAccount);
+            collection.isExistingBusiness = isExistingBusiness;
+        }
+        if(IsBoth){
+            System.debug('Have Both Axiom & Statasan == TRUE ==> '+childAccount);
+            collection.IsBoth = IsBoth;
+        }
+        if(IsOther){
+            System.debug('Have IDEA or Null == TRUE ==> '+childAccount);
+            collection.IsOther = IsOther;
+        }
+        accHierCollectionMap.put(ultimateParent, collection);
+    }
+
+    //apex wrapper class for hierarchy collection
+    public class accountHierarchyWrapper {
+        public Id ultimateParent;
+        public Boolean isProdForTerr = false;
+        public Boolean isExistingBusiness = false;
+        public Boolean isActiveStratasanSubscription = false;
+        public String vertical;
+        public String SalesTerrAssignType;
+        public String SalesTerrAssignType_Stratasan;
+        public Account[] childAccounts;
+        public Boolean IsBoth = false;
+        public Boolean IsOther = false;
+        public accountHierarchyWrapper(){
+            List<Account> childAccounts = new List<Account>();
+            this.childAccounts = childAccounts;
+        }
+
+    }
+
+    //determine Account type in a Hierarchy based on rules
+    //If an Account has a Parent Account or an Ultimate Parent and no other Accounts 'roll up' to the Account (it's a Child)
+    //If an Account has a Parent Account or an Ultimate Parent and other Accounts 'roll up' to the Account (it's a Parent)
+    //If an Account does not have a Parent or Ultimate Parent it's either an Ultimate Parent or a Stand Alone
+    //If other Accounts 'roll up' the the Account / If there are other Accounts in the Hierarch  (it's an Ultimate Parent)
+    //If no other Accounts 'roll up' to the Account / If there are no other Accounts in the Hierarchy (it's a Stand Alone)
+
+    public static Map<Id, Account> getAccountHierType(Set<Id> accountIds) {
+        Map<Id, Account> accountMap = new Map<Id, Account>();
+
+        for (Account account : [
+                SELECT Id,Name, ParentId,SYNT_Account_Hierarchy_Type__c, (SELECT Id FROM ChildAccounts LIMIT 1)
+                FROM Account
+                WHERE Id IN : accountIds
+        ]){
+            if(String.isNotEmpty(account.ParentId)){
+                if(account.ChildAccounts.size() > 0){
+                    //Parent &  children
+                    account.SYNT_Account_Hierarchy_Type__c = 'Parent';
+                }else{
+                    //Parent with no children
+                    account.SYNT_Account_Hierarchy_Type__c = 'Child';
+                }
+
+            }else{
+                if(account.ChildAccounts.size() > 0) {
+                    //no parent, but with children
+                    account.SYNT_Account_Hierarchy_Type__c = 'Ultimate Parent';
+                }else{
+                    //no parent, no children
+                    account.SYNT_Account_Hierarchy_Type__c = 'Stand Alone';
+                }
+            }
+            accountMap.put(account.Id, account);
+        }
+
+        //visualize map output in debug logs
+        for (Account acc : accountMap.values()) {
+            System.debug(acc);
+        }
+        return accountMap;
+    }
+
+}
