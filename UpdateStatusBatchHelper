@@ -1,0 +1,215 @@
+/***********************************************************************************************************
+Apex Class Name      :  UpdateStatusBatchHelpers
+Created Date         :  July/30/2023
+Function             :  Batch class to update the Contact & Lead Object fields(Status & Disqualified Reason)
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+public class UpdateStatusBatchHelper {
+/***********************************************************************************************************
+Apex Method Name     :  UpdateLeads
+Created Date         :  July/30/2023
+Function             :  SCENARIO 1 - If Status is Meeting Booked For Leads, the most recent Event “End Date” >= 60 Days Ago
+					    Update Lead Status & Disqualified Reason
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+    Public Static Void UpdateLeads(List<lead> lds){
+        set<Id> leadsToUpdate = New set<Id>();
+        for(Lead leads : lds){
+            
+            if(leads.Status == 'Meeting Booked'){
+                // Query EventRelations related to the contact
+                List<EventRelation> eventRelations = [SELECT Id, EventId, RelationId FROM EventRelation WHERE RelationId = :leads.Id];
+                
+                // Check if eventRelations are Empty
+                if (!eventRelations.isEmpty()) {
+                    Set<Id> EventIds = New Set<Id> ();
+                    For(EventRelation eve : eventRelations){
+                        EventIds.add(eve.EventId);
+                    }
+                    System.debug('Event ids'+ EventIds);
+                    // Get Events
+                    List<Event> events = [SELECT Id, WhoId, Type, EndDateTime FROM Event WHERE Id IN :EventIds
+                                          AND Type IN ('Discovery Meeting', 'Remote Demo', 'Onsite Demo', 'Onsite Meeting') ORDER BY EndDateTime DESC LIMIT 1 ALL ROWS];
+                    System.debug('Event id'+ events);
+                    // Check if Events are Empty
+                    if (!events.isEmpty()) { 
+                        Event GetEvent = events[0];
+                        if(GetEvent.EndDateTime <= System.today().addDays(-60)){
+                            leadsToUpdate.add(Leads.Id);
+                        }
+                    }
+                }
+            }
+            
+        }
+        if (!leadsToUpdate.isEmpty()) {
+            List<Lead> leadUpdate = new List<Lead>();
+            for (Lead Leads : lds) {
+                if (leadsToUpdate.contains(Leads.Id)) {
+                    Leads.Status = 'Nurture';
+                    Leads.Disqualified_Reason__c = 'Status Not Moved (SFDC Automation)';
+                    leadUpdate.add(Leads);
+                }
+            }
+            // Update Leads
+            update leadUpdate;
+            System.debug('Updated:' + leadUpdate);
+        }
+        
+    }
+/***********************************************************************************************************
+Apex Method Name     :  UpdateContacts
+Created Date         :  July/30/2023
+Function             :  SCENARIO 1 - If Status is Meeting Booked For Contact, the most recent Event “End Date” >= 60 Days Ago
+					    Update Contact Status & Disqualified Reason
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+    Public Static Void UpdateContacts(List<contact> Con){
+        
+        Set<Id> ConListToUpdate = New Set<Id> ();
+        for (Contact contact : Con) {
+            if(Contact.FCRM__FCR_Status__c == 'Meeting Booked'){
+                // Query EventRelations related to the contact
+                List<EventRelation> eventRelations = [SELECT Id, EventId, RelationId FROM EventRelation WHERE RelationId = :contact.Id];
+                
+                // Check if eventRelations are Empty
+                if (!eventRelations.isEmpty()) {
+                    Set<Id> EventIds = New Set<Id> ();
+                    For(EventRelation eve : eventRelations){
+                        EventIds.add(eve.EventId);
+                    }
+                    System.debug('Event ids'+ EventIds);
+					
+                    // Get Events
+                    List<Event> TotalEvents = [SELECT Id, WhoId, Type, EndDateTime FROM Event WHERE Id IN :EventIds
+                                          AND Type IN ('Discovery Meeting', 'Remote Demo', 'Onsite Demo', 'Onsite Meeting') ORDER BY EndDateTime DESC LIMIT 1 ALL ROWS];
+                    System.debug('Event id'+ TotalEvents);
+                    // Check if Events are Empty
+                    if (!TotalEvents.isEmpty()) { 
+                        Event GetEvent = TotalEvents[0];
+                        if(GetEvent.EndDateTime <= System.today().addDays(-60)){
+                            ConListToUpdate.add(contact.Id);
+                        }
+                    }
+                }
+            }
+        }
+        if (!ConListToUpdate.isEmpty()) {
+            List<Contact> ContactsToUpdate = new List<Contact>();
+            for (Contact contact : Con) {
+                if (ConListToUpdate.contains(contact.Id)) {
+                    contact.FCRM__FCR_Status__c = 'Nurture';
+                    contact.Disqualified_Reason__c = 'Status Not Moved (SFDC Automation)';
+                    ContactsToUpdate.add(contact);
+                }
+            }
+            // Update Contacts
+            update ContactsToUpdate;
+            System.debug('Updated:' + ContactsToUpdate);
+        }
+        
+    }    
+/***********************************************************************************************************
+Apex Method Name     :  UpdateOpenContacts
+Created Date         :  July/30/2023
+Function             :  SCENARIO 3 - If Status is “SDR Working” or “Sales Exec Working” and LastActivity >= 90 Days Ago
+					    Update Contact Status & Disqualified Reason
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+    Public Static Void UpdateOpenContacts(List<contact> Con){
+        List<contact> OpenContacts = New List<Contact>();
+        for(Contact Cont : Con){
+            system.debug('Contact Id'+ Cont.id);
+            if(Cont.FCRM__FCR_Status__c == 'Open' && cont.FCRM__FCR_Status_Last_Set__c <= system.now().adddays(-90)){
+                system.debug('Contact Id Found');
+                Cont.FCRM__FCR_Status__c = 'Nurture';
+                Cont.Disqualified_Reason__c = 'Status Not Moved (SFDC Automation)';  
+                OpenContacts.add(cont);
+            }
+        }
+        if(!OpenContacts.isempty()){
+            Update OpenContacts;
+            System.debug('Updated:'+ OpenContacts);
+        }
+    }
+/***********************************************************************************************************
+Apex Method Name     :  UpdateOpenLeads
+Created Date         :  July/30/2023
+Function             :  SCENARIO 3 - If Status is “SDR Working” or “Sales Exec Working” and LastActivity >= 90 Days Ago
+					    Update Lead Status & Disqualified Reason
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+    Public Static Void UpdateOpenLeads(List<lead> lds) {
+        List<Lead> OpenLead = New List<Lead>();
+        for(Lead Ld : Lds){
+            if(Ld.Status == 'Open' && Ld.FCRM__FCR_Status_Last_Set__c <= system.now().adddays(-90)){
+                Ld.Status = 'Nurture';
+                Ld.Disqualified_Reason__c = 'Status Not Moved (SFDC Automation)';  
+                OpenLead.add(Ld);
+            }
+        }
+        if(!OpenLead.isempty()){
+            Update OpenLead;
+            System.debug('Updated:'+ OpenLead);
+        }
+    }
+/***********************************************************************************************************
+Apex Method Name     :  UpdateContactsWithActivitys
+Created Date         :  July/30/2023
+Function             :  SCENARIO 2 - If Status is open and Lastsetdate >= 90 Days Ago
+					    Update Lead Status & Disqualified Reason
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+    Public Static Void UpdateContactsWithActivitys(List<contact> contacts){
+        List<Contact> contactsToUpdate = new List<Contact>();
+        
+        for (Contact contact : contacts) {
+            
+            if ((contact.FCRM__FCR_Status__c == 'Sales Exec Working' ||contact.FCRM__FCR_Status__c == 'SDR Working') && (contact.ActivityHistories.isEmpty() || contact.ActivityHistories[0].ActivityDate <= Date.today().addDays(-90)) && contact.FCRM__FCR_Status_Last_Set__c <=system.now().adddays(-90)) {
+                contact.FCRM__FCR_Status__c = 'Nurture';
+                contact.Disqualified_Reason__c = 'Status Not Moved (SFDC Automation)';
+                contactsToUpdate.add(contact);
+            }
+            
+        }
+        
+        if (!contactsToUpdate.isEmpty()) {
+            update contactsToUpdate;
+        }
+        
+    }
+/***********************************************************************************************************
+Apex Method Name     :  UpdateLeadsWithActivitys
+Created Date         :  July/30/2023
+Function             :  SCENARIO 2 - If Status is open and Lastsetdate >= 90 Days Ago
+					    Update Lead Status & Disqualified Reason
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+    Public Static Void UpdateLeadsWithActivitys(List<Lead> Leads){
+        List<Lead> LeadsToUpdate = new List<Lead>();
+        
+        for (Lead Lead : Leads) {
+            
+            if ((Lead.Status =='SDR Working'|| Lead.Status =='Sales Exec Working') && (Lead.ActivityHistories.isEmpty() || Lead.ActivityHistories[0].ActivityDate <= Date.today().addDays(-90)) && Lead.FCRM__FCR_Status_Last_Set__c <=system.now().adddays(-90)) {
+                Lead.Status = 'Nurture';
+                Lead.Disqualified_Reason__c = 'Status Not Moved (SFDC Automation)';
+                LeadsToUpdate.add(Lead);
+            }
+            
+        }
+        
+        if (!LeadsToUpdate.isEmpty()) {
+            update LeadsToUpdate;
+            System.debug('Updated Leads:'+LeadsToUpdate);
+        }
+        
+    }
+    
+}
