@@ -1,0 +1,70 @@
+/***********************************************************************************************************
+Apex Class Name      :  UpdateStatusBatch
+Created Date         :  July/25/2023
+Function             :  Batch class to update the Contact & Lead Object fields(Status & Disqualified Reason)
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+Global class UpdateStatusBatch implements Database.Batchable<sObject>,Schedulable {
+    
+    Global List<sObject> start(Database.BatchableContext context) {
+        // Query Contacts and Leads based on criteria
+        
+        List<sObject> scope = new List<sObject>();
+        
+        List<Contact> lstcon =[SELECT Id, Name, FCRM__FCR_Status__c, Disqualified_Reason__c,FCRM__FCR_Status_Last_Set__c,(SELECT Id,Whoid, Type, EndDateTime FROM Events WHERE TYPE IN ('Discovery Meeting', 'Remote Demo', 'Onsite Demo', 'Onsite Meeting') ORDER BY EndDateTime DESC),(SELECT Id, Subject, ActivityDate FROM ActivityHistories ORDER BY ActivityDate DESC) FROM CONTACT WHERE FCRM__FCR_Status__c IN ('Meeting Booked','open','SDR Working','Sales Exec Working')];
+        Scope.addAll(lstcon);
+        
+        List<Lead> lstld = [SELECT Id,Name,Status,FCRM__FCR_Status_Last_Set__c,(SELECT Id,Whoid, Type, EndDateTime FROM Events WHERE TYPE IN ('Discovery Meeting', 'Remote Demo', 'Onsite Demo', 'Onsite Meeting') ORDER BY EndDateTime DESC),(SELECT Id, Subject, ActivityDate FROM ActivityHistories ORDER BY ActivityDate DESC) from LEAD WHERE Status IN ('Meeting Booked','open','SDR Working','Sales Exec Working')];
+        Scope.addAll(lstld);
+        
+        return scope;
+        
+       
+    }
+
+    Global void execute(Database.BatchableContext context, List<sObject> scope) {
+    List<Contact> contactsToUpdate = new List<Contact>();
+    List<Lead> leadsToUpdate = new List<Lead>();  
+     for(sObject obj : scope)
+        {
+            switch on obj
+            {
+                when Lead ld
+                {
+                leadsToUpdate.add(ld);
+                }
+                when Contact cont
+                {
+                contactsToUpdate.add(cont);
+                }
+            }
+        }
+         if (!contactsToUpdate.isEmpty()) {
+            UpdateStatusBatchHelper.UpdateContacts(contactsToUpdate);
+            UpdateStatusBatchHelper.UpdateOpenContacts(contactsToUpdate);
+            UpdateStatusBatchHelper.UpdateContactsWithActivitys(contactsToUpdate);
+            system.debug('Updated Contacts'+ contactsToUpdate);
+        }
+        
+        if (!leadsToUpdate.isEmpty()) {
+            UpdateStatusBatchHelper.UpdateLeads(leadsToUpdate);
+            UpdateStatusBatchHelper.UpdateOpenLeads(leadsToUpdate);
+            UpdateStatusBatchHelper.UpdateLeadsWithActivitys(leadsToUpdate);
+            system.debug('Updated Leads'+ leadsToUpdate);
+        }
+        
+    }
+        
+        
+
+    Global void finish(Database.BatchableContext context) {
+        
+    }
+    //execute method to schedule a batch.
+    Global void execute(SchedulableContext SC){
+        database.executeBatch(new UpdateStatusBatch(),100);
+    }
+    
+    
+}
