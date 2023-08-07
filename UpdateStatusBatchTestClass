@@ -1,0 +1,164 @@
+/***********************************************************************************************************
+Apex TestClass Name  :  UpdateStatusBatchTestClass
+Created Date         :  Aug/02/2023
+Function             :  Test Class for UpdateStatusBatch
+Story                :  US-3193
+Developer            :  Santosh
+************************************************************************************************************/
+
+@isTest
+private class UpdateStatusBatchTestClass {
+    @TestSetup
+    static void setup(){
+        // Create test data for Account
+        Account acc = SYNT_UtilityTestData.createAccount(True, 'Test Account', '1234');
+        // Create test data for Contacts
+        List<Contact> testContacts = new List<Contact>();
+        for (Integer i = 0; i < 10; i++) {
+            testContacts.add(new Contact(FirstName = 'Test Contact ' + i,LastName = 'Last Name ' + i,AccountId	= Acc.id,FCRM__FCR_Status__c = 'Meeting Booked'));
+        }
+        insert testContacts;
+        // Create test data for Leads
+        List<Lead> testLeads = new List<Lead>();
+        for (Integer i = 0; i < 10; i++) {
+            testLeads.add(new Lead(FirstName = 'Test Lead ' + i,LastName = 'Last Name ' + i,Status = 'Meeting Booked',Company = 'Test Company' + i));
+        }
+        insert testLeads;
+    }
+    @isTest
+    static void testUpdateStatusBatch() {
+        
+        
+        List<Contact> testContacts = [SELECT Id, FirstName, LastName, FCRM__FCR_Status__c FROM Contact WHERE FCRM__FCR_Status__c = 'Meeting Booked'];
+        
+        List<Lead> testLeads = [SELECT Id, Status FROM Lead WHERE Status = 'Meeting Booked'];
+        
+        // Create a single Event for multiple Contacts
+        Event testEvent = new Event(
+            Subject = 'Test Event',
+            Type = 'Discovery Meeting',
+            StartDateTime = System.today().addDays(-62),
+            EndDateTime = System.today().addDays(-61)
+        );
+        insert testEvent;
+        
+        // Create EventRelations for Contacts
+        List<EventRelation> eventRelationsContacts = new List<EventRelation>();
+        for (Contact cont : testContacts) {
+            eventRelationsContacts.add(new EventRelation(
+                EventId = testEvent.Id,
+                RelationId = cont.Id
+            ));
+        }
+        insert eventRelationsContacts;
+        
+        // Create EventRelations for Leads
+        List<EventRelation> eventRelationsLeads = new List<EventRelation>();
+        for (Lead ld : testLeads) {
+            eventRelationsLeads.add(new EventRelation(
+                EventId = testEvent.Id,
+                RelationId = ld.Id
+            ));
+        }
+        insert eventRelationsLeads;
+        
+        Test.startTest();
+        UpdateStatusBatch batchInstance = new UpdateStatusBatch();
+        Database.executeBatch(batchInstance);
+        // Schedule the batch to run using the Schedule class
+        String cronExp = '0 0 0 ? * *'; // Set the cron expression for the schedule (e.g., midnight daily)
+        UpdateStatusBatch scheduledJob = new UpdateStatusBatch();
+        String jobId = System.schedule('UpdateStatusJob', cronExp, scheduledJob);
+        Test.stopTest();
+        
+        // Verify the results
+        List<Contact> updatedContacts = [SELECT Id, FCRM__FCR_Status__c, Disqualified_Reason__c FROM Contact WHERE FCRM__FCR_Status__c = 'Nurture'];
+        System.assertEquals(10, updatedContacts.size(), 'All test contacts should have been updated');
+        
+        List<Lead> updatedLeads = [SELECT Id, Status, Disqualified_Reason__c FROM Lead WHERE Status = 'Nurture'];
+        System.assertEquals(10, updatedLeads.size(), 'All test leads should have been updated');
+    }
+    @istest
+    static void UpdateSDRSalesExec() {
+        
+        List<Contact> testContacts = [Select id,FirstName,LastName,FCRM__FCR_Status__c from Contact Where FCRM__FCR_Status__c = 'Meeting Booked'];
+        
+        List<contact> lstcon = New List<Contact>();
+        for(Contact cont : testContacts){cont.FCRM__FCR_Status_Last_Set__c = System.today().addDays(-100);Cont.FCRM__FCR_Status__c = 'SDR Working';
+                                         lstcon.add(cont);
+                                        }
+        Update lstcon;
+        
+        List<Task> TestTask = new List<Task>();
+        for (Contact cont : testContacts) {
+            TestTask.add(new Task(Subject = 'Follow-up Task',ActivityDate = System.today().addDays(-91),WhoId  = cont.Id));
+        }
+        insert TestTask;
+        
+        List<lead> testLeads = [Select id,Status from Lead Where Status = 'Meeting Booked'];
+        
+        
+        List<Lead> lds = New List<Lead>();
+        
+        for(Lead ld : testLeads){ld.FCRM__FCR_Status_Last_Set__c = System.today().addDays(-100);ld.Status = 'SDR Working';
+                                 lds.add(ld);
+                                }
+        Update lds;
+        
+        List<Task> LeadTestTask = new List<Task>();
+        for (Lead ld : testLeads) {
+            LeadTestTask.add(new Task(Subject = 'Follow-up Task',ActivityDate = System.today().addDays(-91),WhoId  = ld.Id));
+        }
+        insert LeadTestTask;
+        
+        
+        Test.startTest();
+        // Start the batch process
+        Database.executeBatch(new UpdateStatusBatch());
+        Test.stopTest();
+        
+        // Verify the results
+        List<Contact> updatedContacts = [SELECT Id, FCRM__FCR_Status__c, Disqualified_Reason__c FROM Contact WHERE FCRM__FCR_Status__c = 'Nurture'];
+        System.assertEquals(10, updatedContacts.size(), 'All test contacts should have been updated');
+        
+        List<Lead> updatedLeads = [SELECT Id, Status, Disqualified_Reason__c FROM Lead WHERE Status = 'Nurture'];
+        System.assertEquals(10, updatedLeads.size(), 'All test leads should have been updated');
+        
+        
+    }
+    @istest
+    static void OpenLeadContacts() {
+        
+        List<Contact> testContacts = [Select id,FirstName,LastName,FCRM__FCR_Status__c from Contact Where FCRM__FCR_Status__c = 'Meeting Booked'];
+        
+        
+        List<contact> lstcon = New List<Contact>();
+        for(Contact cont : testContacts){
+            cont.FCRM__FCR_Status_Last_Set__c = System.today().addDays(-91);
+            Cont.FCRM__FCR_Status__c = 'Open';
+            lstcon.add(cont);
+        }
+        Update lstcon;
+        List<lead> testLeads = [Select id,Status from Lead Where Status = 'Meeting Booked'];
+        
+        List<Lead> lds = New List<Lead>();
+        for(Lead ld : testLeads){
+            ld.FCRM__FCR_Status_Last_Set__c = System.today().addDays(-91);
+            ld.Status = 'Open';
+            lds.add(ld);
+        }
+        Update lds;
+        Test.startTest();
+        // Start the batch process
+        Database.executeBatch(new UpdateStatusBatch());
+        Test.stopTest();
+        
+        // Verify the results
+        List<Contact> updatedContacts = [SELECT Id, FCRM__FCR_Status__c, Disqualified_Reason__c FROM Contact WHERE FCRM__FCR_Status__c = 'Nurture'];
+        System.assertEquals(10, updatedContacts.size(), 'All test contacts should have been updated');
+        
+        List<Lead> updatedLeads = [SELECT Id, Status, Disqualified_Reason__c FROM Lead WHERE Status = 'Nurture'];
+        System.assertEquals(10, updatedLeads.size(), 'All test leads should have been updated');
+        
+    }
+}
