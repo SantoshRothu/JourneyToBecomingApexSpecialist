@@ -1,0 +1,446 @@
+/**************************************************************************************************
+Apex Class Name      :  SYNT_AccHierarchyTerrAssignBatch
+Version              :  1.0
+Created Date         :  12/17/2021
+Function             :  STORY-1363: Test Class for SYNT_AccHierarchyTerrAssignBatch
+*--------------------------------------------------------------------------------------------------
+* Developer                   Date                   Description
+* -------------------------------------------------------------------------------------------------
+* Jeevana Irala (AGG)       12/17/2021              First Iteration
+* Jeevana Irala (AGG)       2/6/2023               Stratasan Enhancement
+***************************************************************************************************/
+
+@IsTest
+private class SYNT_AccHierarchyTerrBatchTest {
+    @testSetup
+    private static void testSetup() {
+        List<Account> accounts = new List<Account>();
+        Account ultimateParent = SYNT_UtilityTestData.createAccount(false,'Ultimate Parent','1001');
+        ultimateParent.SYNT_Vertical__c = 'Healthcare';
+        ultimateParent.Type = 'Client';
+        ultimateParent.BillingCountry = 'United States';
+        ultimateParent.BillingStreet = 'Hamilton Street';
+        ultimateParent.BillingPostalCode='91770';
+        ultimateParent.BillingCity='Sacramento';
+        ultimateParent.BillingStateCode='CA';
+        ultimateParent.BillingGeocodeAccuracy = 'Address';
+        ultimateParent.ShippingStreet = 'Hamilton Street';
+        ultimateParent.ShippingCity = 'Sacramento';
+        ultimateParent.ShippingStateCode = 'CA';
+        ultimateParent.ShippingPostalCode = '91770';
+        ultimateParent.ShippingCountryCode = 'US';
+        insert ultimateParent;
+        Account parent = SYNT_UtilityTestData.createAccount(false,'Parent','2001');
+        parent.ParentId = ultimateParent.Id;
+        parent.SYNT_Vertical__c = 'Healthcare';
+        insert parent;
+        Account child = SYNT_UtilityTestData.createAccount(false,'Child','3001');
+        child.ParentId = parent.Id;
+        child.SYNT_Vertical__c = 'Healthcare';
+        accounts.add(child);
+        Account standAlone = SYNT_UtilityTestData.createAccount(false,'Stand Alone','4001');
+        standAlone.SYNT_Vertical__c = 'Healthcare';
+        standAlone.Type = 'Client';
+        accounts.add(standAlone);
+        insert accounts; 
+
+        Contact contact = SYNT_UtilityTestData.createContact(true,'1234567890','Admin',ultimateParent.Id,'test@teset.com');
+    }
+
+    //Test full batch process with full account hierarchy collection
+    @IsTest
+    static void testAccHierarchyTerrAssignBatch() {
+        List<Account> accounts = [SELECT Id, ParentId,Name, AccountNumber,Product_Families_Test__c FROM Account];
+        for(Account acc : accounts){
+            System.debug('BeforeBatch=>'+acc);
+        }
+        Test.startTest();
+            Database.executeBatch(new SYNT_AccHierarchyTerrAssignBatch(), 100);
+        Test.stopTest();
+
+        List<Account> accountsAfter = [SELECT Id, Name,SYNT_Account_Hierarchy_Type__c,SYNT_Sales_Territory_AssignType__c,Sales_Terr_Assignment_Type_Stratasan__c FROM Account];
+        for(Account acc : accountsAfter){
+            System.debug('AfterBatch=>'+acc);
+            //Account Name should match Hierarchy type
+            System.assertEquals(acc.SYNT_Account_Hierarchy_Type__c, acc.Name, 'Hierarchy Type incorrect');
+            //Account Sales Territory type = New Business
+            System.assertEquals(acc.SYNT_Sales_Territory_AssignType__c, 'New Business', 'Sales Territory Type incorrect');
+            //Account Stratasan Sales Territory type = New Business
+            System.assertEquals(acc.Sales_Terr_Assignment_Type_Stratasan__c, 'New Business', 'Stratasan Sales Territory Type incorrect');
+        }
+    }
+    
+   // This test method Commented, further not dealing with Subscriptions 
+   //test single batch run and test 'Existing Business' logic
+   /*@IsTest
+    static void testAccHierarchyTerrAssignBatchSingleExistingBusiness() {
+        Account ultimateParent = [SELECT Id, ParentId,Name, AccountNumber FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        //new product
+        Product2 newProduct = SYNT_UtilityTestData.getProduct('Axiom Product' , 'Axiom-1', 'SYNT_Core4');
+        newProduct.SYNT_Should_create_Asset__c = true;
+        newProduct.SBQQ__SubscriptionPricing__c = 'Fixed Price';
+        newProduct.SBQQ__SubscriptionTerm__c = 12;
+        newProduct.Deployment_Type__c = 'Cloud';
+        newProduct.Purchase_Type__c = 'Subscription';
+        newProduct.Client_Products_for_Territory__c = 'TRUE';
+        insert newProduct;
+        //new product
+        Product2 newProduct_Stratasan = SYNT_UtilityTestData.getProduct('Stratasan Product' , 'Stratasan-1', 'SYNT_Core5');
+        newProduct_Stratasan.SYNT_Should_create_Asset__c = true;
+        newProduct_Stratasan.SBQQ__SubscriptionPricing__c = 'Fixed Price';
+        newProduct_Stratasan.SBQQ__SubscriptionTerm__c = 12;
+        newProduct_Stratasan.Deployment_Type__c = 'Cloud';
+        newProduct_Stratasan.Purchase_Type__c = 'Subscription';
+        newProduct_Stratasan.Client_Products_for_Territory__c = 'Stratasan';  //Stratasan product
+        insert newProduct_Stratasan;
+        //new contract
+        Date subsStartDate = Date.today().addMonths(-15);
+        Date subsEndDate = subsStartDate.addMonths(12);
+        Contract contract = new Contract(AccountId=ultimateParent.Id, StartDate=subsStartDate, EndDate=subsEndDate, ContractTerm=12, SBQQ__PreserveBundleStructureUponRenewals__c=true   );
+        insert contract;
+
+        //add subscriptions with two platforms
+        List<SBQQ__Subscription__c> subsList = new List<SBQQ__Subscription__c>();
+        SBQQ__Subscription__c newSub = new SBQQ__Subscription__c();
+        newSub.SBQQ__Account__c     =   ultimateParent.Id;
+        newSub.SBQQ__Contract__c    =   contract.Id;
+        newSub.SBQQ__Product__c     =   newProduct.Id;
+        newSub.SBQQ__Quantity__c    =   1;
+        newSub.SBQQ__ListPrice__c   =   100;
+        newSub.SBQQ__NetPrice__c    =   100;
+        newSub.SBQQ__CustomerPrice__c=  100;
+        newSub.SBQQ__RenewalQuantity__c =   1;
+        newSub.SYNT_DetailType__c       =   'New Business';
+        newSub.SBQQ__SubscriptionStartDate__c   =   subsStartDate;
+        newSub.SBQQ__SubscriptionEndDate__c     =   subsEndDate;
+        newSub.SBQQ__SegmentStartDate__c        =   subsStartDate;
+        newSub.SBQQ__SegmentEndDate__c          =   subsEndDate;
+        newSub.SYNT_Platform__c                 =   'Axiom';
+        insert  newSub;
+        SBQQ__Subscription__c newSub_Stratasan = new SBQQ__Subscription__c();
+        newSub_Stratasan.SBQQ__Account__c     =   ultimateParent.Id;
+        newSub_Stratasan.SBQQ__Contract__c    =   contract.Id;
+        newSub_Stratasan.SBQQ__Product__c     =   newProduct_Stratasan.Id;
+        newSub_Stratasan.SBQQ__Quantity__c    =   1;
+        newSub_Stratasan.SBQQ__ListPrice__c   =   100;
+        newSub_Stratasan.SBQQ__NetPrice__c    =   100;
+        newSub_Stratasan.SBQQ__CustomerPrice__c=  100;
+        newSub_Stratasan.SBQQ__RenewalQuantity__c =   1;
+        newSub_Stratasan.SYNT_DetailType__c       =   'New Business';
+        newSub_Stratasan.SBQQ__SubscriptionStartDate__c   =   subsStartDate;
+        newSub_Stratasan.SBQQ__SubscriptionEndDate__c     =   subsEndDate;
+        newSub_Stratasan.SBQQ__SegmentStartDate__c        =   subsStartDate;
+        newSub_Stratasan.SBQQ__SegmentEndDate__c          =   subsEndDate;
+        newSub_Stratasan.SYNT_Platform__c                 =   'Axiom';
+        
+        insert  newSub_Stratasan;
+
+        System.debug('Ultimate Parent=>'+ultimateParent);
+        System.debug('subscription=>'+newSub);
+
+        Test.startTest();
+            SYNT_AccHierarchyTerrAssignBatch.accountSalesTerrAssignSingle(ultimateParent.Id);
+        Test.stopTest();
+
+        Account upAccAfter = [SELECT Id, Name,SYNT_Account_Hierarchy_Type__c,SYNT_Sales_Territory_AssignType__c,Sales_Terr_Assignment_Type_Stratasan__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        System.debug('Ultimate Parent=>'+upAccAfter);
+        //Account Name should match Hierarchy type
+        System.assertEquals(upAccAfter.SYNT_Account_Hierarchy_Type__c, upAccAfter.Name, 'Hierarchy Type incorrect');
+        //Account Sales Territory type = Existing Business
+        System.assertEquals(upAccAfter.SYNT_Sales_Territory_AssignType__c, 'Existing Business', 'Sales Territory Type incorrect');
+        //Account Stratasan Sales Territory type = Existing Business
+        System.assertEquals(upAccAfter.Sales_Terr_Assignment_Type_Stratasan__c, 'Existing Business', 'Stratasan Sales Territory Type incorrect');
+    } */
+
+   //test single batch run for Named Account (Enterprise)
+    @IsTest
+    static void testAccHierarchyTerrAssignBatchSingleNamedAccountEnterprise() {
+        Account ultimateParent = [SELECT Id, ParentId,Name, AccountNumber FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        ultimateParent.SYNT_Sales_Territory_AssignType__c = 'Named Account (Enterprise)';
+        ultimateParent.Sales_Terr_Assignment_Type_Stratasan__c = 'Named Account (Enterprise)';
+        update ultimateParent;
+        System.debug('Ultimate Parent=>'+ultimateParent);
+
+        Test.startTest();
+            SYNT_AccHierarchyTerrAssignBatch.accountSalesTerrAssignSingle(ultimateParent.Id);
+        Test.stopTest();
+
+        Account upAccAfter = [SELECT Id, Name,SYNT_Account_Hierarchy_Type__c,SYNT_Sales_Territory_AssignType__c,Sales_Terr_Assignment_Type_Stratasan__c
+                                        FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        System.debug('Ultimate Parent=>'+upAccAfter);
+        //Account Name should match Hierarchy type
+        System.assertEquals(upAccAfter.SYNT_Account_Hierarchy_Type__c, upAccAfter.Name, 'Hierarchy Type incorrect');
+        //Account Sales Territory type = Existing Business
+        System.assertEquals(upAccAfter.SYNT_Sales_Territory_AssignType__c, 'Named Account (Enterprise)', 'Sales Territory Type incorrect');
+        //Account Stratasan Sales Territory type = Existing Business
+        System.assertEquals(upAccAfter.Sales_Terr_Assignment_Type_Stratasan__c, 'Named Account (Enterprise)', 'Stratasan Sales Territory Type incorrect');
+    }
+
+    //test single batch run for Named Account (Enterprise)
+    @IsTest
+    static void testAccHierarchyTerrAssignBatchSingleNamedAccountExceptionNewSale() {
+        Account ultimateParent = [SELECT Id, ParentId,Name, AccountNumber FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        ultimateParent.SYNT_Sales_Territory_AssignType__c = 'Named Account (Exception New Sale)';
+        ultimateParent.Sales_Terr_Assignment_Type_Stratasan__c = 'Named Account (Exception New Sale)';
+        update ultimateParent;
+        System.debug('Ultimate Parent=>'+ultimateParent);
+
+        Test.startTest();
+        SYNT_AccHierarchyTerrAssignBatch.accountSalesTerrAssignSingle(ultimateParent.Id);
+        Test.stopTest();
+
+        Account upAccAfter = [SELECT Id, Name,SYNT_Account_Hierarchy_Type__c,SYNT_Sales_Territory_AssignType__c,Sales_Terr_Assignment_Type_Stratasan__c
+        FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        System.debug('Ultimate Parent=>'+upAccAfter);
+        //Account Name should match Hierarchy type
+        System.assertEquals(upAccAfter.SYNT_Account_Hierarchy_Type__c, upAccAfter.Name, 'Hierarchy Type incorrect');
+        //Account Sales Territory type = Existing Business
+        System.assertEquals(upAccAfter.SYNT_Sales_Territory_AssignType__c, 'Named Account (Exception New Sale)', 'Sales Territory Type incorrect');
+        //Account Stratasan Sales Territory type = Existing Business
+        System.assertEquals(upAccAfter.Sales_Terr_Assignment_Type_Stratasan__c, 'Named Account (Exception New Sale)', 'Stratasan Sales Territory Type incorrect');
+    }
+
+
+
+    //Test Batch Scheduler process.
+    @isTest
+    static void batchApexTestScheduler() {
+        String CRON_EXP = '0 0 0 * * ? *';
+        Test.startTest();
+        String jobId = System.schedule('Account Hierarchy job', CRON_EXP, new SYNT_AccHierarchyTerrAssignBatch());
+        CronTrigger ct = [SELECT Id, CronExpression, TimesTriggered, NextFireTime FROM CronTrigger WHERE id = :jobId];
+        Test.stopTest();
+        System.assertEquals(CRON_EXP, ct.CronExpression);
+        System.assertEquals(0, ct.TimesTriggered);
+    }
+
+
+
+    //Validate Account transfer date determination logic.
+    //Coverage for SYNT_UpdateAccountTransferDate and SYNT_OpportunityTriggerHandler
+    @isTest
+    public static void updateAccTransferDateFromOpp() {
+        Account account = [SELECT Id, Name FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        Contact contact = [SELECT Id, Name FROM Contact WHERE AccountId = :account.Id LIMIT 1];
+
+        Id salesRepProfileId = [SELECT Id FROM Profile WHERE Name = 'Sales Rep' LIMIT 1].Id;
+        User salesRepUser = SYNT_UtilityTestData.getUser(salesRepProfileId, '1');
+        insert salesRepUser;
+
+        UserRole userRole = [SELECT Id FROM UserRole WHERE DeveloperName = 'System_Admin_CIO' LIMIT 1];
+        Id adminProfId = [Select Id From Profile Where Name = 'System Administrator'].Id;
+        User adminUser = SYNT_UtilityTestData.createUser(false, 'John', 'Admin', adminProfId);
+        adminUser.Email = 'test@123.com';
+        adminUser.UserRoleId = userRole.Id;
+        insert adminUser;
+
+        Id apiOnlyProfId = [Select Id From Profile Where Name = 'API Only Profile'].Id;
+        User apiOnlyUser = SYNT_UtilityTestData.createUser(false, 'John', 'API', apiOnlyProfId);
+        adminUser.Email = 'test@123.com';
+        adminUser.UserRoleId = userRole.Id;
+        insert apiOnlyUser;
+
+        Opportunity opportunity1 = new Opportunity();
+
+        //run as Admin user to create opportunity to avoid MIXED_DML_OPERATION issue with User and opp data in same tx.
+        System.runAs(adminUser) {
+            opportunity1.AccountId = account.Id;
+            opportunity1.Name = 'Test_Opportunity';
+            opportunity1.Type = 'New Business';
+            opportunity1.Platform__c = 'Axiom';
+            opportunity1.SYNT_BillToStreet__c = 'Hamilton Street';
+            opportunity1.SYNT_BillToPostalCode__c = '91770';
+            opportunity1.SYNT_BillToCity__c = 'Sacramento';
+            opportunity1.SYNT_BillToState__c = 'California';
+            opportunity1.SYNT_BillToCountry__c = 'United States';
+            opportunity1.CloseDate = System.today() + 20;
+            opportunity1.StageName = '0-Target';
+            opportunity1.SYNT_WonReason__c = 'Price/Budget';
+            opportunity1.SYNT_ReasonDetail__c = 'Good Pricing';
+            opportunity1.Legacy_Contract_End_Date__c = system.today().addDays(-30);
+            insert opportunity1;
+
+            Product2 newProduct = SYNT_UtilityTestData.getProduct('Axiom Product' , 'Axiom-1', 'SYNT_Core4');
+            newProduct.SYNT_Should_create_Asset__c = true;
+            newProduct.SBQQ__SubscriptionPricing__c = 'Fixed Price';
+            newProduct.SBQQ__SubscriptionTerm__c = 12;
+            newProduct.Deployment_Type__c = 'Cloud';
+            newProduct.Purchase_Type__c = 'Subscription';
+            newProduct.Client_Products_for_Territory__c = 'Client Product';
+            insert newProduct;
+
+            Id pricebookId = Test.getStandardPricebookId();    //get standard price book id
+            PricebookEntry pbEntry1 = SYNT_UtilityTestData.getPricebookEntry(pricebookId, newProduct.Id);  //insert pricebook entry
+            insert pbEntry1;
+
+            OpportunityLineItem oppLineItem = SYNT_UtilityTestData.getOpportunityLineItem(opportunity1.Id, newProduct.Id, pbEntry1.Id);
+            insert oppLineItem;
+
+            OpportunityContactRole oppConRole = new OpportunityContactRole();
+            oppConRole.isPrimary = true;
+            oppConRole.ContactId = contact.Id;
+            oppConRole.OpportunityId = opportunity1.Id;
+            oppConRole.Role = 'Billing Contact';
+            insert oppConRole;
+
+            OpportunityTeamMember solutionEngTeamMember = SYNT_UtilityTestData.getOpportunityTeamMember(opportunity1.Id, salesRepUser.Id, 'Solution Engineer');
+            insert solutionEngTeamMember;
+
+            Contract con = new Contract(SBQQ__Opportunity__c = opportunity1.Id, AccountId = account.id);
+            insert con;
+
+            SBQQ__Quote__c quote = SYNT_UtilityTestData.getQuote(account.Id, contact.Id, opportunity1.Id);
+            insert quote;
+
+            quote.SBQQ__Status__c = 'Approved';
+            update quote;
+        }
+
+        // run as API Only (Skips validations &  Opp Trigger logic) to set the opportunity stage directly to 6-Closed Won.
+        // Setting in one by one stage cross the soql limits.
+        System.runAs(apiOnlyUser) {
+            Opportunity opp2 = [SELECT Id, StageName,SBQQ__PrimaryQuote__c,CloseDate FROM Opportunity LIMIT 1];
+            opp2.StageName = '5-Agreement';
+            update opp2;
+        }
+        //run again as admin user to run through the apex trigger logic which determines account transfer date.
+        System.runAs(adminUser) {
+            Test.startTest();
+            Opportunity opp3 = [SELECT Id, StageName,SBQQ__PrimaryQuote__c,CloseDate FROM Opportunity LIMIT 1];
+            opp3.StageName = '6-Closed Won';
+            opp3.SYNT_6_Growth_Ops_Audit_Complete__c = true;
+            update opp3;
+            Test.stopTest();
+        }
+        Opportunity oppFinal = [SELECT Id, Account.SYNT_Account_Transfer_Date__c, Account.SYNT_Sales_Territory_AssignType__c,SYNT_ContractStartDate__c FROM Opportunity LIMIT 1];
+
+        //validation for Territory Type.
+        //For new business opportunity with closed won, sales territory type should be Named Account (Exception New Sale)
+        System.debug('Account Sales Territory Assignment '+oppFinal.Account.SYNT_Sales_Territory_AssignType__c);
+        System.assertEquals(oppFinal.Account.SYNT_Sales_Territory_AssignType__c, 'Named Account (Exception New Sale)','Account Sales Territory Assignment Error' );
+
+        //validation for Transfer date
+        Integer transferMonths = 14;        //set default value as 14 months
+        //get the soft coded value
+        String lastNMonths_settings = SYNT_GlobalSettings__mdt.getInstance('SYNT_ExistBusiness_Transfer_Duration').SYNT_Value__c;
+        if(Integer.valueOf(lastNMonths_settings) > 0) {
+            transferMonths = Integer.valueOf(lastNMonths_settings);
+        }
+        //add 14 months from today into future to determine transfer date
+        Date newBusinessTransferDate = oppFinal.SYNT_ContractStartDate__c.addMonths(transferMonths);
+        System.debug('Account Transfer date'+oppFinal.Account.SYNT_Account_Transfer_Date__c);
+        System.assertEquals(oppFinal.Account.SYNT_Account_Transfer_Date__c, newBusinessTransferDate,'Account Transfer Date error' );
+
+    }
+
+    //User story 1712 - Test full batch process with for exception rule added to the process
+    //when Type = 'Partner Client' then classify territory type as 'Existing Business'
+    @IsTest
+    static void testTerrAssignBatchPartnerClient() {
+        Account account = [SELECT Id, Name,Type,SYNT_Vertical__c,SYNT_Sales_Territory_AssignType__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        account.Type = 'Partner Client';
+        update account;
+        System.debug('BeforeBatch=> '+account);
+
+        Test.startTest();
+        Database.executeBatch(new SYNT_AccHierarchyTerrAssignBatch(), 100);
+        Test.stopTest();
+        Account accAfter = [SELECT Id, Name,Type,SYNT_Vertical__c,SYNT_Sales_Territory_AssignType__c,Sales_Terr_Assignment_Type_Stratasan__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        System.debug('AfterBatch=> '+accAfter);
+        //Account Sales Territory type = Existing Business
+        System.assertEquals(accAfter.SYNT_Sales_Territory_AssignType__c, 'Existing Business', 'Sales Territory Type for Partner Client and Financial Institutions incorrect');
+    }
+    //This Mehod Checks Sales Terr Asssignment type when Account Contains Stratasan in Product Family
+    @IsTest
+    static void AccountContainsStratasan() {
+        // Create or query an Account record for testing
+        Account account = [SELECT Id, Name, Type, SYNT_Vertical__c, SYNT_Sales_Territory_AssignType__c, Product_Families_Test__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        account.Product_Families_Test__c = 'Stratasan';
+        
+        // Update the account record
+        update account;
+        System.debug('BeforeBatch=> ' + account);
+        
+        // Start the test context
+        Test.startTest();
+        // Execute the batch job
+        Database.executeBatch(new SYNT_AccHierarchyTerrAssignBatch(), 100);
+        // Stop the test context
+        Test.stopTest();
+        
+        // Query the account record after the batch job has executed
+        Account accAfter = [SELECT Id, Name, Type, SYNT_Vertical__c, SYNT_Sales_Territory_AssignType__c, Sales_Terr_Assignment_Type_Stratasan__c, Product_Families_Test__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        System.debug('AfterBatch=> ' + accAfter);
+        
+        // Assertions to verify the changes made by the batch job
+        System.assertEquals('New Business', accAfter.SYNT_Sales_Territory_AssignType__c, 'Sales Territory Type for Client is incorrect');
+        System.assertEquals('Existing Business', accAfter.Sales_Terr_Assignment_Type_Stratasan__c, 'Sales Territory Type for Client is incorrect');
+        
+    }
+    //This Mehod Checks Sales Terr Asssignment type when Account Contains Both Stratasan & Axion in Product Family
+    @isTest
+    Static void ContainsBothAxiomandStratasan (){
+        // Create or query an Account record for testing
+        Account account = [SELECT Id, Name, Type, SYNT_Vertical__c, SYNT_Sales_Territory_AssignType__c, Product_Families_Test__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        // Update the product families field with multiple values
+        account.Product_Families_Test__c = 'Stratasan,Axiom';
+        update account;
+        
+        // Start a new test context
+        Test.startTest();
+        // Execute the batch job again
+        Database.executeBatch(new SYNT_AccHierarchyTerrAssignBatch(), 100);
+        // Stop the test context
+        Test.stopTest();
+        
+        // Query the account record after the second batch job execution
+        Account Accaxiomstrat = [SELECT Id, Name, Type, SYNT_Vertical__c, SYNT_Sales_Territory_AssignType__c, Sales_Terr_Assignment_Type_Stratasan__c, Product_Families_Test__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        System.debug('AfterBatch=> ' + Accaxiomstrat);
+        
+        // Assertions for the second batch job execution
+        System.assertEquals('Existing Business', Accaxiomstrat.SYNT_Sales_Territory_AssignType__c, 'Sales Territory Type for Client is incorrect');
+        System.assertEquals('Existing Business', Accaxiomstrat.Sales_Terr_Assignment_Type_Stratasan__c, 'Sales Territory Type for Client is incorrect');
+    }
+    //This Mehod Checks Sales Terr Asssignment type when Account Contains Axion in Product Family
+    @isTest
+    Static void AccounthaveAxiom (){
+        // Create or query an Account record for testing
+        Account account = [SELECT Id, Name, Type, SYNT_Vertical__c, SYNT_Sales_Territory_AssignType__c, Product_Families_Test__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        // Update the product families field with multiple values
+        account.Product_Families_Test__c = 'Axiom';
+        update account;
+        
+        // Start a new test context
+        Test.startTest();
+        // Execute the batch job again
+        Database.executeBatch(new SYNT_AccHierarchyTerrAssignBatch(), 100);
+        // Stop the test context
+        Test.stopTest();
+    }
+    //This Mehod Checks Sales Terr Asssignment type when Account Contains Null in Product Family
+    @IsTest
+    Static void AccountNullprodfam(){
+        // Create or query an Account record for testing
+        Account account = [SELECT Id, Name, Type, SYNT_Vertical__c, SYNT_Sales_Territory_AssignType__c, Product_Families_Test__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        // Update the product families field with multiple values
+        account.Product_Families_Test__c = '';
+        update account;
+        
+        // Start a new test context
+        Test.startTest();
+        // Execute the batch job again
+        Database.executeBatch(new SYNT_AccHierarchyTerrAssignBatch(), 100);
+        // Stop the test context
+        Test.stopTest();
+         // Query the account record after the second batch job execution
+        Account Acc = [SELECT Id, Name, Type, SYNT_Vertical__c, SYNT_Sales_Territory_AssignType__c, Sales_Terr_Assignment_Type_Stratasan__c, Product_Families_Test__c FROM Account WHERE Name = 'Ultimate Parent' LIMIT 1];
+        System.debug('AfterBatch=> ' + Acc);
+        
+        // Assertions for the second batch job execution
+        System.assertEquals('New Business', Acc.SYNT_Sales_Territory_AssignType__c, 'Sales Territory Type for Client is incorrect');
+        System.assertEquals('New Business', Acc.Sales_Terr_Assignment_Type_Stratasan__c, 'Sales Territory Type for Client is incorrect');
+    }
+
+
+
+}
