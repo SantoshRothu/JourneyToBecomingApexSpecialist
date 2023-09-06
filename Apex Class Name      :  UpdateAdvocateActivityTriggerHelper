@@ -1,0 +1,372 @@
+/******************************************************************************************************************   
+Apex Class Name      :  UpdateAdvocateActivityTriggerHelper                                                                      
+Created Date         :  July 19,2023                                                         
+@description         :  This class performs the helper role for the trigger handler (UpdateAdvocateActivityTrigger)
+Story                :  STY-3021                                                                        
+Developer            :  Santosh                                                                               
+*******************************************************************************************************************/
+public With Sharing class UpdateAdvocateActivityTriggerHelper {
+/***********************************************************************************************
+* @description This method Create/Update Activity based on Date Completed Field
+* @Method  handleAfterUpdate  
+* @param   newReferences List of new Related Reference records
+* @param   oldReferences Map of old Related Reference records (Id to Related_Reference__c)
+* @Author  Santosh
+* @Since   July 18, 2023
+***********************************************************************************************/
+public static void handleAfterUpdate(List<Related_Reference__c> newReferences , Map<Id, Related_Reference__c> oldReferences) {
+    Set<Id> accountIds = new Set<Id>();
+    Map<Id, Advocate_Activity__c> accountIdToActivityMap = new Map<Id, Advocate_Activity__c>();
+
+    for (Related_Reference__c reference : newReferences) {
+        if (oldReferences != null) {
+            Related_Reference__c oldReference = oldReferences.get(reference.Id);
+            if (oldReference.Date_Completed__c != null && reference.Date_Completed__c == null) {
+                accountIds.add(reference.Reference_Account__c);
+            }
+        }
+        if (reference.Date_Completed__c != null) {
+            accountIds.add(reference.Reference_Account__c);
+        }
+    }
+
+    if (!accountIds.isEmpty()) {
+        List<Reference_Request__c> referenceRequests = [SELECT Id, Type_of_Reference__c FROM Reference_Request__c WHERE Id IN (SELECT Reference_Request__c FROM Related_Reference__c WHERE Id IN :newReferences)];
+        Map<Id, Reference_Request__c> referenceRequestMap = new Map<Id, Reference_Request__c>(referenceRequests);
+
+        for (Advocate_Activity__c activity : [SELECT Id, Calendar_Year__c, Account__c, Site_Visit_Count__c, Reference_Call_Count__c, RFP_Count__c, Virtual_Site_Visit_Count__c, RFP_Submission_Count__c FROM Advocate_Activity__c WHERE Account__c IN :accountIds AND CALENDAR_YEAR(Calendar_Year__c) = :Date.today().year()]) {
+            accountIdToActivityMap.put(activity.Account__c, activity);
+        }
+
+        List<Advocate_Activity__c> advocateActivitiesToUpdate = new List<Advocate_Activity__c>();
+        List<Advocate_Activity__c> advocateActivitiesToInsert = new List<Advocate_Activity__c>();
+
+        for (Related_Reference__c reference : newReferences) {
+            Advocate_Activity__c activity = accountIdToActivityMap.get(reference.Reference_Account__c);
+
+            if (activity == null) {
+                // Create Advocate Activity
+                activity = new Advocate_Activity__c(
+                    Name = getAdvocateActivityName(reference.Reference_Account__c, Date.today().year()),
+                    Calendar_Year__c = Date.newInstance(Date.today().year(), 1, 1),
+                    Account__c = reference.Reference_Account__c
+                );
+                advocateActivitiesToInsert.add(activity);
+            }
+
+            if (referenceRequestMap.containsKey(reference.Reference_Request__c)) {
+                Reference_Request__c referenceRequest = referenceRequestMap.get(reference.Reference_Request__c);
+                String typeOfReference = referenceRequest.Type_of_Reference__c;
+
+                updateAdvocateActivityField(activity, typeOfReference);
+                advocateActivitiesToUpdate.add(activity);
+            }
+        }
+
+        insert advocateActivitiesToInsert;
+        update advocateActivitiesToUpdate;
+    }
+}
+
+private static void updateAdvocateActivityField(Advocate_Activity__c activity, String typeOfReference) {
+    if (typeOfReference == 'In Person Site Visit') {
+        activity.Site_Visit_Count__c = incrementField(activity.Site_Visit_Count__c);
+    } else if (typeOfReference == 'Reference Call') {
+        activity.Reference_Call_Count__c = incrementField(activity.Reference_Call_Count__c);
+    } else if (typeOfReference == 'RFP') {
+        activity.RFP_Count__c = incrementField(activity.RFP_Count__c);
+    } else if (typeOfReference == 'Virtual Site Visit') {
+        activity.Virtual_Site_Visit_Count__c = incrementField(activity.Virtual_Site_Visit_Count__c);
+    }
+}
+
+private static Decimal incrementField(Decimal fieldValue) {
+    return fieldValue != null ? fieldValue + 1 : 1;
+}
+
+
+/***********************************************************************************************
+* @description This method Return Srting Which Concanecate Account Name & Year for Advocate Activity
+* @Method  GetAdvocateActivityName  
+* @param   accountId 
+* @param   year 
+* @Author  Santosh
+* @return Srting
+* @Since   July 18, 2023
+***********************************************************************************************/
+
+private static String getAdvocateActivityName(Id accountId, Integer year) {
+    Account account = [SELECT Name FROM Account WHERE Id = :accountId LIMIT 1];
+    return account.Name + ' - ' + String.valueOf(year);
+}
+/***********************************************************************************************
+* @description This method Throw Error if Related Reference have Duplicate Account
+* @Method  EliminateDuplicateRelatedReference  
+* @param   newReferences New Related Reference 
+* @Author  Santosh
+* @Since   July 18, 2023
+***********************************************************************************************/
+public static void eliminateDuplicateRelatedReference(List<Related_Reference__c> newReferences) {
+    Set<Id> accountIds = new Set<Id>();
+    Set<Id> refreq = New Set<Id>();
+    for (Related_Reference__c refer : newReferences) {
+        accountIds.add(refer.Reference_Account__c);
+        RefReq.add(refer.Reference_Request__c);
+        
+    }
+    
+    List<Related_Reference__c> existingReferences = [SELECT Id, Reference_Account__c,Reference_Request__c FROM Related_Reference__c WHERE Reference_Account__c IN :accountIds AND Reference_Request__c IN :RefReq];
+    Map<Id, Related_Reference__c> accountToReferenceMap = new Map<Id, Related_Reference__c>();
+    
+    for (Related_Reference__c existingReference : existingReferences) {
+        accountToReferenceMap.put(existingReference.Reference_Account__c, existingReference);
+    }
+    
+    for (Related_Reference__c newReference : newReferences) {
+        if (accountToReferenceMap.containsKey(newReference.Reference_Account__c)) {
+            newReference.addError('The Account Already Exists with Related Reference Record');
+        }
+    }
+}
+/***********************************************************************************************
+* @description This method Create & Update Advocate Activity When Date Completed field Changed
+* @Method  UpdateDateofConatct  
+* @param   newReferences Related Reference,
+* @param   oldreferences Related ReferenceOld Related Reference
+* @Author  Santosh
+* @Since   July 16, 2023
+***********************************************************************************************/
+
+Public Static Void updateDateofConatct(List<Related_Reference__c> newReferences , Map<id,Related_Reference__c> oldreferences){
+    // Set to store unique Account Ids
+    Set<Id> accountIds = new Set<Id>();
+    for (Related_Reference__c reference : newReferences) {
+        
+        if (reference.Date_Completed__c == null || reference.Date_of_Contact__c != null || (reference.Date_Completed__c != null && reference.Date_of_Contact__c == null)) {
+            // First time "Date Completed" is set
+            accountIds.add(reference.Reference_Account__c);
+        }
+        
+    }
+    if (!accountIds.isEmpty()) {
+        List<Advocate_Activity__c> advocateActivitiesToUpdate = new List<Advocate_Activity__c>();
+        List<Advocate_Activity__c> advocateActivitiesToInsert = new List<Advocate_Activity__c>();
+        
+        
+        Map<Id, Reference_Request__c> referenceRequestMap = new Map<Id, Reference_Request__c>([SELECT Id, Type_of_Reference__c FROM Reference_Request__c
+                                                                                                WHERE Id IN (SELECT Reference_Request__c FROM Related_Reference__c WHERE Id IN :newReferences)]);    
+        
+                                                                                                Integer currentYear = Date.today().year();                   
+        Map<id,Advocate_Activity__c> accAdvocateActivity = new  Map<id,Advocate_Activity__c>([SELECT Id, Calendar_Year__c, Account__c,Site_Visit_Count__c, Reference_Call_Count__c,RFP_Count__c, Virtual_Site_Visit_Count__c,RFP_Submission_Count__c FROM Advocate_Activity__c                                                                
+        WHERE Account__c = :accountId AND CALENDAR_YEAR(Calendar_Year__c) =:currentYear]);
+        for (Id accountId : accountIds) {
+            // Initialize the advocateActivity here
+            Advocate_Activity__c advocateActivity;
+            
+            for (Related_Reference__c references : newReferences) {
+                
+                // Find or create Advocate Activity for account
+                //Integer currentYear = Date.today().year();
+                //List<Advocate_Activity__c> existingActivities = [SELECT Id, Calendar_Year__c, Account__c,Site_Visit_Count__c, Reference_Call_Count__c,RFP_Count__c, Virtual_Site_Visit_Count__c,RFP_Submission_Count__c FROM Advocate_Activity__c                                                                
+                                                                    //WHERE Account__c = :accountId AND CALENDAR_YEAR(Calendar_Year__c) =:currentYear LIMIT 1];
+                                                                    Advocate_Activity__c existingActivities =  accAdvocateActivity.get(accountId);
+                // Create Advocate Activiy if No Advocate Activity Exist
+                if (existingActivities.isEmpty() && references.Date_of_Contact__c != null) {
+                    
+                    advocateActivity = new Advocate_Activity__c();
+                    advocateActivity.Name = getAdvocateActivityName(accountId, Date.today().year());
+                    advocateActivity.Calendar_Year__c = Date.newInstance( Date.today().year(), 1, 1);
+                    advocateActivity.Account__c = accountId;
+                    if (referenceRequestMap.containsKey(references.Reference_Request__c)) {
+                        Reference_Request__c referenceRequest = referenceRequestMap.get(references.Reference_Request__c);
+                        
+                        String typeOfReference = referenceRequest.Type_of_Reference__c;
+                        
+                        if (typeOfReference == 'RFP' && references.Date_of_Contact__c != null) {
+                            advocateActivity.RFP_Submission_Count__c = 1;
+                        }
+                    }
+                    
+                    
+                    advocateActivitiesToInsert.add(advocateActivity);
+                }
+                
+                // Update Advocate Activity if Advocate Activity Exist & New Insert of Related Reference
+                else if (!existingActivities.isEmpty() &&  Oldreferences == Null) {
+                    
+                    Advocate_Activity__c existingActivity = existingActivities[0];
+                    
+                    // Related_Reference__c oldReference = Oldreferences.get(references.Id);
+                    
+                    if (referenceRequestMap.containsKey(references.Reference_Request__c)) {
+                        Reference_Request__c referenceRequest = referenceRequestMap.get(references.Reference_Request__c);
+                        
+                        String typeOfReference = referenceRequest.Type_of_Reference__c;
+                        
+                        if (typeOfReference == 'RFP' && references.Date_of_Contact__c != null ) {
+                            Decimal rfpsub = existingActivity.RFP_Submission_Count__c;
+                            rfpsub = rfpsub != null ? rfpsub + 1 : 1;
+                            existingActivity.RFP_Submission_Count__c = rfpsub;
+                            advocateActivitiesToUpdate.add(existingActivity);
+                        }
+                    }
+                    
+                } 
+                
+                // Update Advocate Activity if related record Update
+                else if (Oldreferences != Null && !existingActivities.isEmpty()) {
+                    Advocate_Activity__c existingActivity = existingActivities[0];
+                    
+                    Related_Reference__c oldReference = Oldreferences.get(references.Id);
+                    // Update Submission Count if Date of Contact Not Null
+                    if( oldReference.Date_of_Contact__c == null && references.Date_of_Contact__c != null){
+                        if (referenceRequestMap.containsKey(references.Reference_Request__c)) {
+                            Reference_Request__c referenceRequest = referenceRequestMap.get(references.Reference_Request__c);
+                            String typeOfReference = referenceRequest.Type_of_Reference__c;
+                            if (typeOfReference == 'RFP' ) {
+                                Decimal rfpsub = existingActivity.RFP_Submission_Count__c;
+                                rfpsub = rfpsub != null ? rfpsub + 1 : 1;
+                                existingActivity.RFP_Submission_Count__c = rfpsub;
+                                advocateActivitiesToUpdate.add(existingActivity);
+                            }
+                        }
+                    }
+                    // Roll Back Submission Count if Date of Contact Null
+                    if ( oldReference.Date_of_Contact__c != null && references.Date_of_Contact__c == null){
+                        if (referenceRequestMap.containsKey(references.Reference_Request__c)) {
+                            Reference_Request__c referenceRequest = referenceRequestMap.get(references.Reference_Request__c);
+                            String typeOfReference = referenceRequest.Type_of_Reference__c;
+                            if (typeOfReference == 'RFP' ) {
+                                Decimal rfpsub = existingActivity.RFP_Submission_Count__c;
+                                rfpsub = rfpsub != null ? rfpsub - 1 : Null;
+                                existingActivity.RFP_Submission_Count__c = rfpsub;
+                                advocateActivitiesToUpdate.add(existingActivity);
+                            }
+                        }
+                        
+                    }
+                    
+                    
+                }  
+                
+            }
+        }
+        
+        // Update Advocate Activities, Related Reference
+        insert advocateActivitiesToInsert;
+        Update advocateActivitiesToUpdate;
+        
+    }
+    
+}
+
+/***********************************************************************************************
+* @description This method Create Related Reference With latest Reference Program
+* @Method  createRelatedReferenceWithLatest
+* @param   lstNewReference Related Referece
+* @Author  Santosh
+* @Since   July 25,2023
+***********************************************************************************************/
+
+public static void createRelatedReferenceWithLatest(List<Related_Reference__c> lstNewReference) {
+    // Collect unique Account Ids from the list of new references
+    Set<Id> accountIds = new Set<Id>();
+    for (Related_Reference__c relRef : lstNewReference) {
+        accountIds.add(relRef.Reference_Account__c);
+    }
+    
+    // Prepare a list to store the new related references to be inserted
+    List<Related_Reference__c> insertRelRef = new List<Related_Reference__c>();
+    Map<id,Reference_Program__c> accountIdToRefProgramMap  = New Map<id,Reference_Program__c> ([SELECT Id,Account__c FROM Reference_Program__c WHERE Account__c = :accountIds]);
+    // Loop through each Account Id and find the latest Reference Program
+    for (Id accId : accountIds) {
+        // Query the Reference Programs related to the current Account Id
+        //List<Reference_Program__c> refPrograms = [SELECT Id,Account__c FROM Reference_Program__c WHERE Account__c = :accId ORDER BY CreatedDate DESC LIMIT 1];
+        Reference_Program__c refPrograms = accountIdToRefProgramMap.get(accId);
+        // Check if there are Reference Programs for the current Account
+        if (!refPrograms.isEmpty()) {
+            // Get the latest Reference Program Id
+            Id latestRefId = refPrograms[0].Id;
+            
+            // Assign the Reference Program Id to each new Related Reference and add them to the list for insertion
+            for (Related_Reference__c relatedRef : lstNewReference) {
+                if (relatedRef.Reference_Account__c == accId) {
+                    Related_Reference__c newRef = new Related_Reference__c();
+                    newref.id = relatedRef.id;
+                    newRef.Reference_Program__c = latestRefId;
+                    newRef.Reference_Account__c = accId;
+                    insertRelRef.add(newRef);
+                }
+            }
+        }
+    }
+    
+    // Insert the new related references
+    Update insertRelRef;
+}
+
+/***********************************************************************************************
+* @description This method Update Advocate Activity When Delete Related Reference
+* @Method  createRelatedReferenceWithLatest
+* @param   oldRelRef Related Referece
+* @Author  Santosh
+* @Since   July 25,2023
+***********************************************************************************************/
+public static void deleteRelRef(Map<Id, Related_Reference__c> oldRelRef) {
+    Set<Id> referenceRequestIds = new Set<Id>();
+    Set<Id> accountIds = new Set<Id>();
+    
+    // Collect unique Reference Request Ids from the deleted related references
+    for (Related_Reference__c ref : OldRelRef.values()) {
+        referenceRequestIds.add(ref.Reference_Request__c);
+        accountIds.add(ref.Reference_Account__c); // Collect unique Account Ids for later use
+    }
+    
+    // Query the related Reference Request records
+    Map<Id, Reference_Request__c> referenceRequestMap = new Map<Id, Reference_Request__c>([
+        SELECT Id, Type_of_Reference__c
+        FROM Reference_Request__c
+        WHERE Id IN :referenceRequestIds
+    ]);
+    
+    List<Advocate_Activity__c> advocateActivitiesToUpdate = new List<Advocate_Activity__c>();
+        Map<Id, Advocate_Activity__c> accountIdToAdvocateActivityMap = new Map<Id, Advocate_Activity__c>([
+        SELECT Id, Site_Visit_Count__c, Reference_Call_Count__c, RFP_Count__c, Virtual_Site_Visit_Count__c, RFP_Submission_Count__c
+        FROM Advocate_Activity__c
+        WHERE Account__c IN :accountIds AND CALENDAR_YEAR(Calendar_Year__c) = :Date.today().year()
+        ]);
+
+    for (Id accountId : accountIds) {
+        // Query Advocate_Activity__c records related to the current Account for the current year
+        Advocate_Activity__c  existingActivities = accountIdToAdvocateActivityMap.get(accountId);
+        
+        if (!existingActivities.isEmpty()) {
+            Advocate_Activity__c advAct = existingActivities[0];
+            for (Related_Reference__c oldRefRecord : OldRelRef.values()) {
+                if (referenceRequestMap.containsKey(oldRefRecord.Reference_Request__c)) {
+                    String typeOfReference = referenceRequestMap.get(oldRefRecord.Reference_Request__c).Type_of_Reference__c;
+                    
+                    // Update Advocate_Activity__c based on the type of reference
+                    if (typeOfReference == 'In Person Site Visit') {
+                        advAct.Site_Visit_Count__c = advAct.Site_Visit_Count__c != null ? advAct.Site_Visit_Count__c - 1 : null;
+                    } else if (typeOfReference == 'Reference Call') {
+                        advAct.Reference_Call_Count__c = advAct.Reference_Call_Count__c != null ? advAct.Reference_Call_Count__c - 1 : null;
+                    } else if (typeOfReference == 'RFP' && oldRefRecord.Date_Completed__c != null) {
+                        advAct.RFP_Count__c = advAct.RFP_Count__c != null ? advAct.RFP_Count__c - 1 : null;
+                    } else if (typeOfReference == 'Virtual Site Visit') {
+                        advAct.Virtual_Site_Visit_Count__c = advAct.Virtual_Site_Visit_Count__c != null ? advAct.Virtual_Site_Visit_Count__c - 1 : null;
+                    }  if (typeOfReference == 'RFP' && oldRefRecord.Date_of_Contact__c != null) {
+                        advAct.RFP_Submission_Count__c = advAct.RFP_Submission_Count__c != null ? advAct.RFP_Submission_Count__c - 1 : null;
+                    }
+                }
+            }
+            advocateActivitiesToUpdate.add(advAct);
+        }
+    }
+    
+    // Update Advocate_Activity__c records
+    update advocateActivitiesToUpdate;
+}
+
+
+}
