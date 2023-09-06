@@ -1,0 +1,289 @@
+/*****************************************************************************************************************************   
+Apex Class Name      :  TaskAdvocateActivityHelper                                                                      
+Created Date         :  July 24,2023                                                         
+@description         :  This class performs the helper role for the trigger handler (TaskAdvocateActivity)
+Story                :  STY-3021                                                                        
+Developer            :  Santosh                                                                               
+******************************************************************************************************************************/
+public With Sharing class Taskadvocateactivityhelper {
+    /***********************************************************************************************
+    * @description This method Create/Update Advocate activity based on Task Type
+    * @Method  CreateAdvocateActivity  
+    * @param   newTasks 
+    * @Author  Santosh
+    * @Since   July 24, 2023
+    ***********************************************************************************************/
+    public static void createAdvocateActivity(List<Task> newTasks) {
+        // Collect relevant Task records
+        Set<Id> accountIds = new Set<Id>();
+        List<Task> advocateTasks = new List<Task>();
+        
+        for (Task task : newTasks) {
+            if (task.Type != null && task.Type.contains('Advocate') && task.Status == 'Completed') {
+                accountIds.add(task.WhatId);
+                advocateTasks.add(task);
+            }
+        }
+        System.debug('accountIds: ' + accountIds);
+        
+        // Query existing Advocate Activities for the relevant Accounts and calendar year
+        Map<Id, Advocate_Activity__c> advocateActivities = new Map<Id, Advocate_Activity__c>();
+        if (Schema.sObjectType.Advocate_Activity__c.isAccessible()){
+        List<Advocate_Activity__c> lstadv = [SELECT Id, Account__c, Calendar_Year__c, Summit_Presentation_Count__c, Webinar_Count__c, In_Person_Speaker_Count__c, Article_Case_Study_Count__c, Testimonial_Count__c
+                                             FROM Advocate_Activity__c
+                                             WHERE Account__c IN :accountIds AND CALENDAR_YEAR(Calendar_Year__c) = :Date.today().year()];
+        System.debug('lstadv: ' + lstadv);
+        }
+        for (Advocate_Activity__c activity : lstadv) {
+            advocateActivities.put(activity.Account__c, activity);
+        }
+        
+        // Update or create Advocate Activities based on Task Type
+        List<Advocate_Activity__c> activitiesToInsert = new List<Advocate_Activity__c>();
+        List<Advocate_Activity__c> activitiesToUpdate = new List<Advocate_Activity__c>();
+        
+        for (Task task : advocateTasks) {
+            Advocate_Activity__c activitys = advocateActivities.get(task.WhatId);
+            
+            System.debug('Advocate Activity'+ activitys);
+            
+            if (activitys == null) {
+                // Create a new Advocate Activity if none exists for the Account and calendar year
+                Advocate_Activity__c newActivity = new Advocate_Activity__c(Account__c = task.WhatId, Calendar_Year__c = Date.newInstance(Date.today().year(), 1, 1),
+                                                     Name = GetAdvocateActivityName(task.WhatId, Date.today().year()));
+                
+                // Update Advocate Activity fields based on Task Type
+                if (task.Type.contains('Summit Presentation')) {
+                    NewActivity.Summit_Presentation_Count__c = 1;
+                }
+                if (task.Type.contains('Webinar')) {
+                    NewActivity.Webinar_Count__c = 1;
+                }
+                if (task.Type.contains('In Person Speaker')) {
+                    NewActivity.In_Person_Speaker_Count__c = 1;
+                }
+                if (task.Type.contains('Article/Case Study')) {
+                    NewActivity.Article_Case_Study_Count__c = 1;
+                }
+                if (task.Type.contains('Testimonial')) {
+                    NewActivity.Testimonial_Count__c = 1;
+                }
+                
+                activitiesToInsert.add(NewActivity);
+                
+            } 
+            if (activitys != null ) {
+                 
+                // If Advocate Activity already exists, update the count fields
+                if (task.Type != Null && task.Type.contains('Summit Presentation')) {
+                   
+                    activitys.Summit_Presentation_Count__c = (activitys.Summit_Presentation_Count__c != null) ? activitys.Summit_Presentation_Count__c + 1 : 1;
+                }
+                else if (task.Type != Null && task.Type.contains('Webinar')) {
+                    activitys.Webinar_Count__c = (activitys.Webinar_Count__c != null) ? activitys.Webinar_Count__c + 1 : 1;
+                }
+                else if (task.Type != Null && task.Type.contains('In Person Speaker')) {
+                    activitys.In_Person_Speaker_Count__c = (activitys.In_Person_Speaker_Count__c != null) ? activitys.In_Person_Speaker_Count__c + 1 : 1;
+                }
+                else if (task.Type != Null && task.Type.contains('Article/Case Study')) {
+                    activitys.Article_Case_Study_Count__c = (activitys.Article_Case_Study_Count__c != null) ? activitys.Article_Case_Study_Count__c + 1 : 1;
+                }
+                else if (task.Type != Null && task.Type.contains('Testimonial')) {
+                    activitys.Testimonial_Count__c = (activitys.Testimonial_Count__c != null) ? activitys.Testimonial_Count__c + 1 : 1;
+                }
+                activitiesToUpdate.add(activitys);
+            }
+        }
+        
+        // Insert Advocate Activities
+        if (!activitiesToInsert.isEmpty()) {
+            if (Schema.sObjectType.Advocate_Activity__c.isCreateable()){
+            insert activitiesToInsert;
+            }
+        }
+        
+        // Update Advocate Activities
+        if (!activitiesToUpdate.isEmpty()) {
+            if (Schema.sObjectType.Advocate_Activity__c.isupdateable()){
+            update activitiesToUpdate;
+        }
+        }
+    }
+    /***********************************************************************************************
+    * @description This method Return Srting Which Concanecate Account Name & Year for Advocate Activity
+    * @Method  GetAdvocateActivityName  
+    * @param accountId The Id of the Account.
+    * @param year The year to be concatenated.
+    * @return String
+    * @Author  Santosh
+    * @Since   July 24, 2023
+    ***********************************************************************************************/
+    private static String getAdvocateActivityName(Id accountId, Integer year) {
+        if (Schema.sObjectType.Account.isAccessible()){
+        Account account = [SELECT Name FROM Account WHERE Id = :accountId LIMIT 1];
+        }
+        return account.Name + ' - ' + String.valueOf(year);
+    }
+    /***********************************************************************************************
+    * @description This method Update Advocate activity When on Task Delete
+    * @Method  UpdateAdvocateActivity  
+    * @param   oldTasks 
+    * @Author  Santosh
+    * @Since   July 24, 2023
+    ***********************************************************************************************/
+    public static void updateAdvocateActivity(Map<Id,Task> oldTasks) {
+        // Collect relevant Task records
+        Set<Id> accountIds = new Set<Id>();
+        List<Task> advocateTasks = new List<Task>();
+        
+        for (Task task : OldTasks.values()) {
+            if (task.Type != null && task.Type.contains('Advocate') && Task.Status == 'Completed') {
+                accountIds.add(task.WhatId);
+                advocateTasks.add(task);
+            }
+        }
+        System.debug('accountIds: ' + accountIds);
+        
+        // Query existing Advocate Activities for the relevant Accounts and calendar year
+        Map<Id, Advocate_Activity__c> advocateActivities = new Map<Id, Advocate_Activity__c>();
+        if (Schema.sObjectType.Advocate_Activity__c.isAccessible()){
+        List<Advocate_Activity__c> lstadv = [SELECT Id, Account__c, Calendar_Year__c, Summit_Presentation_Count__c, Webinar_Count__c, In_Person_Speaker_Count__c, Article_Case_Study_Count__c, Testimonial_Count__c
+                                             FROM Advocate_Activity__c
+                                             WHERE Account__c IN :accountIds AND CALENDAR_YEAR(Calendar_Year__c) = :Date.today().year()];
+        System.debug('lstadv: ' + lstadv);
+    }
+        
+        for (Advocate_Activity__c activity : lstadv) {
+            advocateActivities.put(activity.Account__c, activity);
+        }
+        
+        // Update or create Advocate Activities based on Task Type
+        List<Advocate_Activity__c> activitiesToInsert = new List<Advocate_Activity__c>();
+        List<Advocate_Activity__c> activitiesToUpdate = new List<Advocate_Activity__c>();
+        
+        for (Task task : advocateTasks) {
+            Advocate_Activity__c activitys = advocateActivities.get(task.WhatId);
+            
+            System.debug('Advocate Activity'+ activitys);
+            
+            if (activitys != null) {
+                 
+                // If Advocate Activity already exists, update the count fields
+                if (task.Type != Null && task.Type.contains('Summit Presentation')) {
+                   
+                    activitys.Summit_Presentation_Count__c = (activitys.Summit_Presentation_Count__c != null) ? activitys.Summit_Presentation_Count__c - 1 : Null;
+                }
+                else if (task.Type != Null && task.Type.contains('Webinar')) {
+                    activitys.Webinar_Count__c = (activitys.Webinar_Count__c != null) ? activitys.Webinar_Count__c - 1 : Null;
+                }
+                else if (task.Type != Null && task.Type.contains('In Person Speaker')) {
+                    activitys.In_Person_Speaker_Count__c = (activitys.In_Person_Speaker_Count__c != null) ? activitys.In_Person_Speaker_Count__c - 1 : Null;
+                }
+                else if (task.Type != Null && task.Type.contains('Article/Case Study')) {
+                    activitys.Article_Case_Study_Count__c = (activitys.Article_Case_Study_Count__c != null) ? activitys.Article_Case_Study_Count__c - 1 : Null;
+                }
+                else if (task.Type != Null && task.Type.contains('Testimonial')) {
+                    activitys.Testimonial_Count__c = (activitys.Testimonial_Count__c != null) ? activitys.Testimonial_Count__c - 1 :Null;
+                }
+                activitiesToUpdate.add(activitys);
+            }
+        }
+
+        // Update Advocate Activities
+        if (!activitiesToUpdate.isEmpty()) {
+            if (Schema.sObjectType.Advocate_Activity__c.isupdateable()) {
+            update activitiesToUpdate;
+            }
+        }
+    }
+    /****************************************************************************************************
+    * @description This method updates Advocate activity when a Task is updated.
+    * @Method  UpdateAdvocateActivity  
+    * @param   newTasks - List of new Task records
+    * @param   oldTasks - Map of old Task records (Task Id as key)
+    * @Author  Santosh
+    * @Since   July 24, 2023
+    ****************************************************************************************************/
+    public static void updateAdvocateActivityWhenTaskUpdated(List<Task> newTasks, Map<Id, Task> oldTasks) {
+        // Collect relevant Task records
+        Set<Id> accountIds = new Set<Id>();
+        List<Task> advocateTasks = new List<Task>();
+        
+        for (Task task : newTasks) {
+            Task oldTask = oldTasks.get(task.Id);
+            // Check if the task type is Advocate and if it has been changed from the old task
+            if (task.Type != null && task.Type.contains('Advocate') && (oldTask.Type != null || oldTask.Type != task.Type) && task.Status == 'Completed') {
+                accountIds.add(task.WhatId);
+                advocateTasks.add(task);
+            }
+        }
+        System.debug('accountIds: ' + accountIds);
+        
+        // Query existing Advocate Activities for the relevant Accounts and calendar year
+        Map<Id, Advocate_Activity__c> advocateActivities = new Map<Id, Advocate_Activity__c>();
+        if (Schema.sObjectType.Advocate_Activity__c.isAccessible()) {
+        List<Advocate_Activity__c> existingAdvocateActivities = [SELECT Id, Account__c, Calendar_Year__c, Summit_Presentation_Count__c, Webinar_Count__c, In_Person_Speaker_Count__c, Article_Case_Study_Count__c, Testimonial_Count__c
+                                                                 FROM Advocate_Activity__c
+                                                                 WHERE Account__c IN :accountIds AND CALENDAR_YEAR(Calendar_Year__c) = :Date.today().year()];
+        System.debug('existingAdvocateActivities: ' + existingAdvocateActivities);
+        }
+        for (Advocate_Activity__c activity : existingAdvocateActivities) {
+            advocateActivities.put(activity.Account__c, activity);
+        }
+        
+        // Update or create Advocate Activities based on Task Type
+        List<Advocate_Activity__c> activitiesToUpdate = new List<Advocate_Activity__c>();
+        List<Advocate_Activity__c> activitiesToInsert = new List<Advocate_Activity__c>();
+        for (Task task : advocateTasks) {
+            Advocate_Activity__c activity = advocateActivities.get(task.WhatId);
+            if (activity == null) {
+                // If Advocate Activity doesn't exist, create a new record
+                activity = new Advocate_Activity__c(Account__c = task.WhatId, Calendar_Year__c = Date.newInstance(Date.today().year(), 1, 1), Name = GetAdvocateActivityName(task.WhatId, Date.today().year()));
+                if (task.Type != null) {
+                if (task.Type.contains('Summit Presentation')) {
+                    activity.Summit_Presentation_Count__c = (activity.Summit_Presentation_Count__c != null) ? activity.Summit_Presentation_Count__c + 1 : 1;
+                } else if (task.Type.contains('Webinar')) {
+                    activity.Webinar_Count__c = (activity.Webinar_Count__c != null) ? activity.Webinar_Count__c + 1 : 1;
+                } else if (task.Type.contains('In Person Speaker')) {
+                    activity.In_Person_Speaker_Count__c = (activity.In_Person_Speaker_Count__c != null) ? activity.In_Person_Speaker_Count__c + 1 : 1;
+                } else if (task.Type.contains('Article/Case Study')) {
+                    activity.Article_Case_Study_Count__c = (activity.Article_Case_Study_Count__c != null) ? activity.Article_Case_Study_Count__c + 1 : 1;
+                } else if (task.Type.contains('Testimonial')) {
+                    activity.Testimonial_Count__c = (activity.Testimonial_Count__c != null) ? activity.Testimonial_Count__c + 1 : 1;
+                }
+                activitiesToInsert.add(activity);
+            }
+        }
+            
+            // Update the count fields based on the task type
+            
+            else  {
+                if (task.Type.contains('Summit Presentation')) {
+                    activity.Summit_Presentation_Count__c = (activity.Summit_Presentation_Count__c != null) ? activity.Summit_Presentation_Count__c + 1 : 1;
+                } else if (task.Type.contains('Webinar')) {
+                    activity.Webinar_Count__c = (activity.Webinar_Count__c != null) ? activity.Webinar_Count__c + 1 : 1;
+                } else if (task.Type.contains('In Person Speaker')) {
+                    activity.In_Person_Speaker_Count__c = (activity.In_Person_Speaker_Count__c != null) ? activity.In_Person_Speaker_Count__c + 1 : 1;
+                } else if (task.Type.contains('Article/Case Study')) {
+                    activity.Article_Case_Study_Count__c = (activity.Article_Case_Study_Count__c != null) ? activity.Article_Case_Study_Count__c + 1 : 1;
+                } else if (task.Type.contains('Testimonial')) {
+                    activity.Testimonial_Count__c = (activity.Testimonial_Count__c != null) ? activity.Testimonial_Count__c + 1 : 1;
+                }
+                activitiesToUpdate.add(activity);
+            }
+        }
+        
+        // Update Advocate Activities
+        if (!activitiesToUpdate.isEmpty()) {
+            if (Schema.sObjectType.Advocate_Activity__c.isupdateable()) {
+            update activitiesToUpdate;
+            }
+        } 
+    	if (!activitiesToInsert.isEmpty()) {
+            if (Schema.sObjectType.Advocate_Activity__c.isCreateable()) {
+                Insert activitiesToInsert;
+            }
+        }
+    }
+
+}
