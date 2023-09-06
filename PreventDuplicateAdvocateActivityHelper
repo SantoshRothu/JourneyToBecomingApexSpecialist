@@ -1,0 +1,142 @@
+/*****************************************************************************************************************************   
+Apex Class Name      :  PreventDuplicateAdvocateActivityHelper                                                                      
+Created Date         :  July 15,2023                                                         
+@description         :  This class performs the helper role for the trigger handler (PreventDuplicateAdvocateActivityTrigger)
+Story                :  STY-3021                                                                        
+Developer            :  Santosh                                                                               
+******************************************************************************************************************************/
+
+public With sharing class PreventDuplicateAdvocateActivityHelper {
+/***********************************************************************************************
+* @description This method Avoid to Create Advocate Activity for Same year
+* @Method  validationOnDuplicateAdvocate  
+* @param   lstAdv New Related Reference
+* @Author  Santosh
+* @Since   July 14, 2023
+***********************************************************************************************/
+public static void validationOnDuplicateAdvocate(List<Advocate_Activity__c> lstAdv) {
+    // Collect the Account Ids from the Advocate Activities being inserted
+    Set<Id> accountIds = new Set<Id>();
+    Set<Integer> yearInt = new Set<Integer>();
+    for (Advocate_Activity__c activity : lstAdv) {
+        accountIds.add(activity.Account__c);
+        Integer dt = activity.Calendar_Year__c.year();
+        yearInt.add(dt);
+    }
+    
+    // Query existing Advocate Activities for the Accounts in the current year
+    if (Schema.sObjectType.Advocate_Activity__c.isAccessible()){
+    List<Advocate_Activity__c> existingActivities = [SELECT Id, Account__c, Calendar_Year__c FROM Advocate_Activity__c WHERE Account__c IN :accountIds];
+    System.debug('Existing Activities: ' + existingActivities);
+    }
+    if (!existingActivities.isEmpty()) {
+        for (Advocate_Activity__c activity : lstAdv) {
+            for (Advocate_Activity__c existingActivity : existingActivities) {
+                if (activity.Calendar_Year__c.year() == existingActivity.Calendar_Year__c.year()) {
+                    activity.addError('The Advocate Activity already exists for this year');
+                    break; // No need to continue checking other existing activities
+                }
+            }
+        }
+    }
+}
+/***********************************************************************************************
+* @description This method Roll up on Account for total Points when Create New Advocate activity
+* @Method  UpdateTotalOnAccount  
+* @param   lstAdv
+* @Author  Santosh
+* @Since   July 14, 2023
+***********************************************************************************************/
+public static void updateTotalOnAccount(List<Advocate_Activity__c> lstAdv) {
+    
+    Set<Id> accountIds = new Set<Id>();
+    for (Advocate_Activity__c reference : lstAdv) {
+        // First time "Date Completed" is set
+        accountIds.add(reference.Account__c);
+    }
+    
+    Map<Id, Decimal> accountPointsMap = new Map<Id, Decimal>();
+    
+    for (Advocate_Activity__c advocateActivity : [SELECT Id, Total_Points__c, Account__c, Account__r.Total_Reference_Points__c FROM Advocate_Activity__c WHERE Account__c IN :accountIds]) {
+        Decimal totalPoints = advocateActivity.Total_Points__c != null ? advocateActivity.Total_Points__c : 0;
+        Decimal totalReferencePoints =  0;
+        
+        totalReferencePoints += totalPoints;
+        accountPointsMap.put(advocateActivity.Account__c, totalReferencePoints);
+    }
+    
+    List<Account> accountsToUpdateList = new List<Account>();
+    for (Id accId : accountIds) {
+        Account acc = new Account(Id = accId, Total_Reference_Points__c = accountPointsMap.get(accId));
+        accountsToUpdateList.add(acc);
+    }
+    if(!accountsToUpdateList.isEmpty()){
+        if (Schema.sObjectType.Account.isupdateable()) {
+    update accountsToUpdateList;
+        }
+    }
+}
+/***********************************************************************************************
+* @description This method Roll up on Account for total Points when delete Advocate activity
+* @Method  UpdateTotalOnAccountondelete  
+* @param   lstAdv
+* @Author  Santosh
+* @Since   July 15, 2023
+***********************************************************************************************/
+public static void updateTotalOnAccountondelete(Map<Id, Advocate_Activity__c> lstAdv) {
+    
+    Set<Id> accountIds = new Set<Id>();
+    for (Advocate_Activity__c reference : lstAdv.values()) {
+        // First time "Date Completed" is set
+        accountIds.add(reference.Account__c);
+    }
+    
+    Map<Id, Decimal> accountPointsMap = new Map<Id, Decimal>();
+    
+    // Query only for the accounts affected by the deleted Advocate_Activity__c records
+    for (Advocate_Activity__c advocateActivity : [SELECT Id, Total_Points__c, Account__c FROM Advocate_Activity__c WHERE Account__c IN :accountIds]) {
+        Decimal totalPoints = advocateActivity.Total_Points__c != null ? advocateActivity.Total_Points__c : 0;
+        Decimal totalReferencePoints = accountPointsMap.containsKey(advocateActivity.Account__c) ? accountPointsMap.get(advocateActivity.Account__c) : 0;
+        
+        totalReferencePoints += totalPoints; // Subtract totalPoints for deleted records
+        accountPointsMap.put(advocateActivity.Account__c, totalReferencePoints);
+    }
+    
+    List<Account> accountsToUpdateList = new List<Account>();
+    for (Id accId : accountIds) {
+        // If the Account is present in the map, update the Total_Reference_Points__c
+        Account acc = new Account(Id = accId, Total_Reference_Points__c = accountPointsMap.get(accId));
+        accountsToUpdateList.add(acc);
+    }
+    
+    update accountsToUpdateList;
+}
+/***********************************************************************************************
+* @description This method set Advocate activity name after insert
+* @Method  getAdvocateActivityName  
+* @param   lstAdv
+* @Author  Santosh
+* @Since   Sept 01, 2023
+***********************************************************************************************/
+public static void getAdvocateActivityName(List<Advocate_Activity__c> lstAdv) {
+    Set<Id> accountIds = new Set<Id>();
+    
+    for (Advocate_Activity__c adv : lstAdv) {
+        if (adv.Calendar_Year__c != null && adv.Account__c != null) {
+            accountIds.add(adv.Account__c);
+        }
+    }
+    
+    // Query for related Account records
+    Map<Id, Account> accountMap = new Map<Id, Account>([SELECT Id, Name FROM Account WHERE Id IN :accountIds]);
+    
+    for (Advocate_Activity__c adv : lstAdv) {
+        if (adv.Calendar_Year__c != null && adv.Account__c != null) {
+            adv.Name = accountMap.get(adv.Account__c).Name + '-' + String.valueOf(adv.Calendar_Year__c.year());
+        }
+    }
+    
+}
+
+    
+}
