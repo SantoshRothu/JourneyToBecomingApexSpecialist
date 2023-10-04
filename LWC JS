@@ -1,0 +1,194 @@
+import { LightningElement,api,track } from 'lwc';
+import { CloseActionScreenEvent } from 'lightning/actions';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+
+import helperfile from './splitcontractshelper'; // helper class
+
+export default class Splitcontacts extends LightningElement {
+    @track isInitialized = false;
+
+    @track contractFields; // used to define the schema for the data table
+    @track contracts; // used as an immutable array of the contracts fetched so any actions made by the user a reversible
+    @track filteredContracts; // actual contracts array being displayed
+    @track consub = [];
+    @track confields= [];
+    @track someCondition = false;
+    
+
+    @track hasSelectedSecondaryContracts = false;
+    @track selectedRows = [];
+    @track selectedSecondaryContractIds = null;
+
+    @track waitingForResponse = false; // flag used to conditionally render loading icon when waiting for serve side calls
+
+    _recordId;
+
+    /**
+     * This sets the recordId variable for use during initialization
+     * and fethcing of contracts. The recordId in this case is the accountId
+     * of the page that this lwc quick action is opened in.
+     */
+    @api set recordId(value) {
+        this._recordId = value;
+        this.initilize();
+    }
+
+    /**
+     * This getter for the recordId is currently not used.
+     * It only exists because lwc framework requires a getter
+     * for every setter
+     */
+    get recordId() {
+        return this._recordId;
+    }
+
+    /**
+     * Fetches contract and their related data once the recordId is set
+     * i.e once the component is inserted into the DOM
+     */
+    async initilize() {
+        this.contractFields = helperfile.getContractFields();
+        this.contracts = await helperfile.getContracts(this.recordId);
+        //this.filteredContracts = helperfile.deepCopyArray(this.contracts);
+
+    }
+
+    // ---------------------------------------------------------------
+    //
+    // Contract Selection and Editing
+    //
+    // ---------------------------------------------------------------
+
+    /**
+     * Handles the selection of a row in the data table.
+     * Simply stores the selected rows for later reference
+     * 
+     * @param {*} event - The event object containing the selected rows.
+     */
+    handleRowSelection(event) {
+        this.selectedRows = event.detail.selectedRows;
+        console.log(this.selectedRows);
+    }
+
+    // ---------------------------------------------------------------
+    //
+    // Submission Handling
+    //
+    // ---------------------------------------------------------------
+
+    /**
+     * Handles the form submission when the user clicks the Next button to
+     * comfirm their selection of contracts to merge.
+     * 
+     * Extracts the currently selected secondary Contracts and stores their Ids
+     * and also prepares variables to update the display for primary contract selection.
+     * 
+     * Will show an error message to the user if they have not selected at least 2 contracts
+     */
+    async handleNext(event) {
+        console.log('Next failed');
+        console.log('selectedRows.length:', this.selectedRows.length); 
+        if (this.selectedRows.length >= 1) {
+            console.log(this.selectedRows);
+            //this.selectedSecondaryContractIds = this.selectedRows.map(row => row.Id);
+
+            this.contracts =await helperfile.deepCopyArray(this.selectedRows);
+            //console.log(this.contracts);
+            const datatableElement = this.template.querySelector('lightning-datatable');
+            datatableElement.selectedRows = [];
+            //datatableElement.maxRowSelection = 1;
+
+            this.hasSelectedSecondaryContracts = true;
+        } else {
+            this.showInfo("Please Select At Least 1 Subscription");
+        }
+    }
+
+    /**
+     * Attempts to complete the merge based on the selected secondary and primary contract
+     * by calling the doMerge apex server-side function.
+     * 
+     * Will display an error message to the user if they have not selected a primary contract
+     */
+    async handleSubmit(event) {
+                
+        const fetchedfields = helperfile.getConFields();
+        this.confields = fetchedfields;
+        console.log('Fields:',this.confields);
+        const fetchedData = await helperfile.getCon(this.recordId);
+        
+            this.consub = fetchedData;
+            console.log('Contract record:',this.consub);
+            this.someCondition = true;
+        /*const datatableElement = this.template.querySelector('[data-id="my-datatable"]');
+                if (datatableElement) {
+            datatableElement.data = this.consub;
+            datatableElement.columns = this.confields;
+            } else {
+            console.error('Datatable element not found.');
+            }*/
+    }
+    renderedCallback() {
+        // Access the Lightning Datatable only when it's available in the DOM
+        const datatableElement = this.template.querySelector('[data-id="my-datatable"]');
+        console.log('datatableElement:', datatableElement);
+        console.log('someCondition:', this.someCondition);
+        if (datatableElement) {
+            datatableElement.data = this.consub;
+            datatableElement.columns = this.confields;
+        } else {
+            console.error('Datatable element not found.');
+        }
+    } 
+    /**
+     * Displays an informational toast message with the specified message.
+     * @param {string} message - The message to be displayed in the toast.
+     */
+    showInfo(message) {
+        this.dispatchEvent(
+            new ShowToastEvent({
+                title: 'Error',
+                message: message,
+                variant: 'info'
+            })
+        );
+    }
+
+    /**
+     * Shows a success toast message and closes the quick action modal for successful Merges.
+     */
+    showSuccess() {
+        this.closeQuickAction();
+        this.dispatchEvent(
+            new ShowToastEvent({
+                title: 'Success!',
+                message: "Successfully Merged Contracts",
+                variant: 'success'
+            })
+        );
+    }
+
+    /**
+     * Shows an error toast message and closes the quick action modal.
+     */
+    showError() {
+        this.closeQuickAction();
+        this.dispatchEvent(
+            new ShowToastEvent({
+                title: 'Error!',
+                message: "There was an error merging Contracts",
+                variant: 'error'
+            })
+        );
+    }
+    
+    /**
+     * This method dispatches a CloseActionScreenEvent to close the quick action modal
+     * in which the component is displayed.
+     */
+    closeQuickAction() {
+        this.dispatchEvent(new CloseActionScreenEvent());
+    }
+
+
+}
