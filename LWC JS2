@@ -1,0 +1,153 @@
+import contractsubscriptions from '@salesforce/apex/Synt_ContractSplit.getsubscriptions';
+import getselectedsub from '@salesforce/apex/Synt_ContractSplit.getselectedsub';
+import contractdetails from '@salesforce/apex/Synt_ContractSplit.getContractDetails';
+/**
+ * Utility class providing access to server-side functions in MergeContracts Apex class
+ * for the MergeContracts Lightning component.
+ * 
+ * Also has utility methods for initalizing variables
+ */
+export default class ManageOrderHelper {
+    fieldValues = [];
+    ConId=[];
+
+    /**
+     * Retrieves the list of contract fields required to display the contract data in the component's datatable.
+     * @returns {Array<Object>} - An array of contract field configurations
+     */
+    static getContractFields() {
+        return [
+            { label: 'Product Name', fieldName: 'SBQQ__ProductName__c', hideDefaultActions: true },
+            { label: 'Subscription #', fieldName: 'Name', hideDefaultActions: true },
+            { label: 'Deployment Type', fieldName: 'SYNT_Deployment_Type__c', hideDefaultActions: true },
+            { label: 'Purchase Type', fieldName: 'SYNT_Purchase_Type__c', hideDefaultActions: true, },
+            { label: 'Platform', fieldName: 'SYNT_Platform__c', hideDefaultActions: true, },
+            { label: 'Segment Key', fieldName: 'SBQQ__SegmentKey__c', hideDefaultActions: true,},
+            { 
+                label: 'Start Date', fieldName: 'SBQQ__StartDate__c', type: "date-local",
+                typeAttributes:{
+                    month: "2-digit",
+                    day: "2-digit"
+                },
+                hideDefaultActions: true
+            },
+            { 
+                label: 'End Date', fieldName: 'SBQQ__EndDate__c', type: "date-local",
+                typeAttributes:{
+                    month: "2-digit",
+                    day: "2-digit"
+                },
+                hideDefaultActions: true 
+            }         
+        ]
+    }
+    /**
+     * Retrieves contracts associated with the specified account ID from the server.
+     *
+     * @param {String} accountId - The ID of the account for which contracts need to be fetched.
+     * @returns {List<Contract>} - A list of contracts associated with the specified account.
+     *                            - The list will include contracts with the following fields:
+     *                              - Id
+     *                              - Status
+     *                              - ContractNumber.
+     *                              - SYNT_PlatformForOpportunity__c
+     *                              - StartDate
+     *                              - EndDate
+     *                              - SYNT_DeploymentType__c
+     *                              - SYNT_PurchaseType__c
+     */
+    static async getContracts(Contractid) {
+        try {
+            const result = await contractsubscriptions({ Contractid: Contractid });
+            console.log(result);
+            return result;
+        } 
+        catch (error) {
+            console.log(error);
+            return null;
+        }
+    }   
+    
+
+    /**
+     * This method is used to create a deep copy of an array to avoid any references to the original array.
+     * 
+     * Note: this is not a full deep copy as it only copies 2 layer deep.
+     * 
+     * @param {Array<contract>} array - The array to be copied.
+     * @returns {Array<contract>} - A new array with copied items.
+     */
+    static async deepCopyArray(array) {
+        const uniqueConIds = new Set();
+        console.log('array:',array);
+        this.fieldValues = array.map(item => item.SBQQ__SegmentKey__c);
+        console.log('fieldValues:',this.fieldValues);
+        array.forEach(item => {
+            uniqueConIds.add(item.SBQQ__Contract__c);
+        });
+        
+        // Convert the Set back to an array and store it in this.ConId
+        this.ConId = Array.from(uniqueConIds);
+        console.log('ConId:', this.ConId);
+        // Call the getselectedsub method here or from a component event handler
+        //console.log(fieldValues);
+        try {
+            // Create an object with the parameters in the correct format
+            const params = {
+                fieldValues: this.fieldValues,
+                Contractid: this.ConId
+            };
+            console.log('Params:',params);
+            const result = await getselectedsub(params);
+
+            console.log('result:', result);
+        
+            // Handle the result here, e.g., update component state
+            const mappedResult = result.map(item => ({ ...item }));
+            console.log('mappedResult:', mappedResult);
+            return mappedResult;
+        
+        } catch (error) {
+            console.log(error);
+        }
+    }
+
+    static getConFields() {
+        return [
+            { label: 'Contract Number', fieldName: 'ContractNumber',type: 'text', hideDefaultActions: true },
+            
+            { label: 'Deployment Type', fieldName: 'SYNT_DeploymentType__c',type: 'text', hideDefaultActions: true },
+            { label: 'Purchase Type', fieldName: 'SYNT_PurchaseType__c',type: 'text', hideDefaultActions: true, },
+            { label: 'Platform', fieldName: 'SYNT_LegacyPlatform__c', type: 'text',hideDefaultActions: true, },
+            
+            { 
+                label: 'Start Date', fieldName: 'StartDate', type: "date-local",
+                typeAttributes:{
+                    month: "2-digit",
+                    day: "2-digit"
+                },
+                hideDefaultActions: true
+            },
+            { 
+                label: 'End Date', fieldName: 'EndDate', type: "date-local",
+                typeAttributes:{
+                    month: "2-digit",
+                    day: "2-digit"
+                },
+                hideDefaultActions: true 
+            },         
+        ];
+    }
+    static async getCon(contractId) {
+        console.log('conid:',contractId);
+        try {
+            const result = await contractdetails({contractId: contractId});
+            console.log(result);
+            return result;
+        } 
+        catch (error) {
+            console.log(error);
+            return null;
+        }
+    } 
+}
