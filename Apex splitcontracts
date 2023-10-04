@@ -1,0 +1,48 @@
+public with sharing class Synt_ContractSplit {
+    @AuraEnabled(cacheable=true)
+    Public static List<SBQQ__Subscription__c> getsubscriptions(Id Contractid){
+        
+        List<SBQQ__Subscription__c> Subscriptionlist = [Select id,SBQQ__Contract__c,SBQQ__StartDate__c,SBQQ__EndDate__c,name,SYNT_Deployment_Type__c,SYNT_Purchase_Type__c,SYNT_Platform__c,SBQQ__ProductName__c,SBQQ__SegmentKey__c
+                                                        from SBQQ__Subscription__c Where SBQQ__Contract__c =: Contractid];
+        
+        return Subscriptionlist;
+    }
+    @AuraEnabled(cacheable=true)
+    Public static List<Contract> getcontracts(Id Contractid){
+        
+        List<Contract> Contractlist = [SELECT Id, Status, ContractNumber, SYNT_PlatformForOpportunity__c, StartDate, EndDate, SYNT_DeploymentType__c, SYNT_PurchaseType__c
+        FROM Contract Where id =: Contractid];
+        
+        return Contractlist;
+    }
+
+    @AuraEnabled(cacheable=true)
+        Public static List<SBQQ__Subscription__c> getselectedsub(list<string> fieldValues,list<id> Contractid ){
+        Set<String> fieldValuesSet = new Set<String>(fieldValues); 
+        List<SBQQ__Subscription__c> Subscriptionlist = [Select id,SBQQ__Contract__c,SBQQ__StartDate__c,SBQQ__EndDate__c,name,SYNT_Deployment_Type__c,SYNT_Purchase_Type__c,SYNT_Platform__c,SBQQ__ProductName__c,SBQQ__SegmentKey__c
+        from SBQQ__Subscription__c Where SBQQ__SegmentKey__c IN : fieldValuesSet AND SBQQ__Contract__c =:Contractid];
+
+        return Subscriptionlist;
+        }
+    @AuraEnabled(cacheable=true)
+    public static Contract getContractDetails(Id contractId) {
+        try {
+            // Use LIMIT 1 to ensure only one record is returned (if available)
+            List<Contract> contracts = [SELECT Id, Status, ContractNumber, SYNT_PlatformForOpportunity__c, StartDate, EndDate, SYNT_DeploymentType__c, SYNT_PurchaseType__c
+                FROM Contract WHERE Id = :contractId LIMIT 1];
+    
+            if (!contracts.isEmpty()) {
+                return contracts[0]; // Return the first (and only) contract found
+            } else {
+                return null; // Return null if no contract with the specified ID is found
+            }
+        } catch (Exception e) {
+            // Handle any exceptions gracefully (e.g., log the error)
+            System.debug('An error occurred: ' + e.getMessage());
+            return null; // Return null in case of an exception
+        }
+    }
+    
+        
+
+}
